@@ -2,6 +2,7 @@
 // profile Grms values), not by calling calcs.js. Run: node --test tests/
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import * as C from '../docs/calcs.js';
 
 const near = (got, want, rel = 1e-6) =>
@@ -69,4 +70,15 @@ test('fasteners, margins, shaft', () => {
   const s = C.shaft(C.toSI(10, 'power', 'hp'), C.toSI(1750, 'frequency', 'rpm'), 0.0254);
   near(C.fromSI(s.T, 'moment', 'lbf·in'), 360.1448997965175);
   near(C.fromSI(s.tau, 'stress', 'psi'), 1834.202913022531);
+});
+
+test('transmissibility vs scipy reference table', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/transmissibility.json', import.meta.url)));
+  assert.ok(refs.length >= 5);
+  for (const q of refs) {
+    const got = C.transmissibility({ fn: q.fn_hz, zeta: q.zeta, f: q.f_hz, baseG: q.base_g });
+    for (const k of ['r', 'TR', 'resp_g', 'rel_disp_mm', 'peak_TR']) near(got[k], q[k]);
+    assert.ok(Math.abs(got.phase_deg - q.phase_deg) <= 1e-6, `phase got ${got.phase_deg}, want ${q.phase_deg}`);
+  }
+  assert.throws(() => C.transmissibility({ fn: 10, zeta: 0, f: 5, baseG: 1 }));
 });

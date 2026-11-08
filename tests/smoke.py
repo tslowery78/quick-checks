@@ -4,7 +4,7 @@ import re, sys
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:8765/'
-TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'units']
+TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'units']
 fails = []
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -27,6 +27,15 @@ with sync_playwright() as p:
                 if err or not outs or any('—' in o for o in outs):
                     fails.append((sysname, t, i, err, outs))
             if sysname == 'us': pg.screenshot(path=f'screenshots/{t}-us.png', full_page=True)
+    # Demo canvas drawn (non-blank) and redraws on input change
+    pg.goto(BASE + '#/transmissibility'); pg.reload(); pg.wait_for_timeout(200)
+    NB = "(() => { const c = document.querySelector('canvas.demo'); if (!c || !c.width) return -1; const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data; let n = 0; for (let i = 3; i < d.length; i += 4) if (d[i]) n++; return n; })()"
+    sig = "(() => { const c = document.querySelector('canvas.demo'); return c.toDataURL().length; })()"
+    n0 = pg.evaluate(NB); s0 = pg.evaluate(sig)
+    if n0 < 1000: fails.append(('transmissibility canvas blank', n0))
+    pg.locator('.row:has-text("Damping") input').fill('0.3'); pg.wait_for_timeout(100)
+    if pg.evaluate(sig) == s0: fails.append(('transmissibility demo did not redraw',))
+    pg.screenshot(path='screenshots/transmissibility-us.png', full_page=True)
     # Known values
     pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','us')")
     pg.goto(BASE + '#/psd'); pg.reload(); pg.wait_for_timeout(150)

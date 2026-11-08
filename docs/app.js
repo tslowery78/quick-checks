@@ -112,6 +112,10 @@ function renderTool(tool, params) {
 
   const err = h('p', { class: 'error', role: 'alert' });
   const extra = h('div', {});
+  const demoCanvas = tool.demo ? h('canvas', { class: 'demo', role: 'img', 'aria-label': `${tool.title} interactive plot` }) : null;
+  let lastSI = null;
+  const redraw = () => { if (demoCanvas && lastSI) tool.demo(lastSI, demoCanvas); };
+  if (demoCanvas) { window.removeEventListener('resize', window.__demoResize); window.__demoResize = redraw; window.addEventListener('resize', redraw); }
   const modeBar = tool.modes ? h('div', { class: 'modes', role: 'tablist' }, tool.modes.map(([k, label]) =>
     h('button', { type: 'button', 'data-k': k, onclick: () => { mode = k; update(); } }, label))) : null;
 
@@ -144,6 +148,8 @@ function renderTool(tool, params) {
     if (res._table) extra.append(h('table', {}, h('thead', {}, h('tr', {}, res._table.head.map(c => h('th', {}, c)))),
       h('tbody', {}, res._table.rows.map(r => h('tr', {}, r.map(c => h('td', {}, c)))))));
     last = { active, res };
+    lastSI = bad || err.textContent ? null : si;
+    if (demoCanvas) { demoCanvas.hidden = !lastSI; redraw(); }
     history.replaceState(null, '', shareHash());
   }
 
@@ -176,6 +182,8 @@ function renderTool(tool, params) {
     h('div', { class: 'grid' },
       h('fieldset', {}, h('legend', {}, 'Inputs'), fields.map(f => f.row)),
       h('fieldset', {}, h('legend', {}, 'Results'), outs.map(o => o.row), err, extra)),
+    demoCanvas,
+    tool.explain ? h('ul', { class: 'explain' }, tool.explain.map(t => h('li', {}, t))) : null,
     h('div', { class: 'actions' },
       h('button', { type: 'button', onclick: () => copy(location.href, 'Link copied') }, 'Copy link'),
       h('button', { type: 'button', onclick: () => copy(calcSheet(), 'Calc sheet copied') }, 'Copy calc sheet'),

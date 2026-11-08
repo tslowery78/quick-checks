@@ -152,3 +152,18 @@ export function shaft(P, f, D, d = 0) {
   const J = Math.PI * (D ** 4 - d ** 4) / 32;
   return { T, J, tau: T * (D / 2) / J };
 }
+
+// ---------- Structural dynamics: base-excitation transmissibility (SDOF) ----------
+// Inputs SI/Hz; base acceleration in Earth g. TR = |abs accel / base accel|.
+export function transmissibility({ fn, zeta, f, baseG }) {
+  if (!(fn > 0) || !(f > 0) || !(zeta > 0) || !(baseG >= 0)) throw new Error('Need fn > 0, f > 0, ζ > 0, base accel ≥ 0.');
+  const r = f / fn, c = 2 * zeta * r, d = 1 - r * r;
+  const TR = Math.sqrt((1 + c * c) / (d * d + c * c));
+  // H = (1 + j2ζr)/(1 - r² + j2ζr); atan2 keeps the denominator angle valid above r = 1.
+  const phase_deg = (Math.atan2(c, 1) - Math.atan2(c, d)) * 180 / Math.PI;
+  const r2pk = (Math.sqrt(1 + 8 * zeta * zeta) - 1) / (4 * zeta * zeta);
+  const peak_TR = Math.sqrt((1 + 4 * zeta * zeta * r2pk) / ((1 - r2pk) ** 2 + 4 * zeta * zeta * r2pk));
+  const wn = 2 * Math.PI * fn; // |z| = A_base / (wn² |1 - r² + j2ζr|)
+  const rel_disp_mm = baseG * G0 / (wn * wn) / Math.sqrt(d * d + c * c) * 1000;
+  return { r, TR, phase_deg, resp_g: TR * baseG, rel_disp_mm, peak_TR };
+}

@@ -2,6 +2,7 @@
 // Input defaults are [US value, SI value] in that system's default unit for the dimension.
 // compute() receives SI values and returns SI values keyed by output key.
 import * as C from './calcs.js';
+import { drawPlot, logspace } from './plot.js';
 
 const E_DEF = [10.0e3, 71.0e3]; // aluminum, ksi / MPa
 
@@ -202,5 +203,43 @@ export const TOOLS = [
     formula: 'T = P/ω, ω = 2πn; τ = T(D/2)/J, J = π(D⁴ − d⁴)/32.',
     assumptions: ['Steady torque only: no bending, keyway stress concentration, or fatigue.'],
     refs: 'Shigley Ch. 3.',
+  },
+  {
+    id: 'transmissibility', title: 'Base-excitation transmissibility', group: 'Structural Dynamics',
+    blurb: 'SDOF on a shaking base: absolute-acceleration gain, phase, response in g, and relative displacement.',
+    inputs: [
+      { key: 'fn', label: 'Natural frequency fn', dim: 'frequency', unit: 'Hz', def: [10, 10] },
+      { key: 'zeta', label: 'Damping ratio ζ', dim: 'none', def: [0.05, 0.05] },
+      { key: 'f', label: 'Forcing frequency f', dim: 'frequency', unit: 'Hz', def: [20, 20] },
+      { key: 'baseG', label: 'Base acceleration', dim: 'accel', unit: 'g', def: [1, 1] },
+    ],
+    outputs: [
+      { key: 'r', label: 'Frequency ratio r = f/fn', dim: 'none' },
+      { key: 'TR', label: 'Transmissibility TR', dim: 'none' },
+      { key: 'phase_deg', label: 'Phase (deg, negative = lag)', dim: 'none' },
+      { key: 'resp_g', label: 'Response accel (abs)', dim: 'accel' },
+      { key: 'rel_disp', label: 'Relative displacement', dim: 'length' },
+      { key: 'peak_TR', label: 'Peak TR (at resonance)', dim: 'none' },
+    ],
+    compute: (v) => { const t = C.transmissibility({ fn: v.fn, zeta: v.zeta, f: v.f, baseG: v.baseG / C.G0 }); return { ...t, resp_g: t.resp_g * C.G0, rel_disp: t.rel_disp_mm / 1000 }; },
+    demo: (v, canvas) => {
+      const rs = logspace(0.1, 10, 160), at = (zeta, r) => C.transmissibility({ fn: 1, zeta, f: r, baseG: 1 }).TR;
+      const faint = [0.01, 0.05, 0.2, 0.5].map(z => ({ faint: true, label: `ζ=${z}`, pts: rs.map(r => [r, at(z, r)]) }));
+      drawPlot(canvas, {
+        xlog: true, ylog: true, xmin: 0.1, xmax: 10, ymin: 0.01, ymax: 100,
+        xlabel: 'Frequency ratio r = f/fn', ylabel: 'Transmissibility TR',
+        curves: [...faint, { pts: rs.map(r => [r, at(v.zeta, r)]) }],
+        vline: { x: Math.SQRT2, label: '√2' },
+        point: { x: v.f / v.fn, y: at(v.zeta, v.f / v.fn) },
+      });
+    },
+    formula: 'r = f/fn;  TR = √[(1 + (2ζr)²) / ((1 − r²)² + (2ζr)²)];  phase = atan2(2ζr, 1) − atan2(2ζr, 1 − r²);  response = TR · base g;  relative displacement = base accel / (ωn² · √((1 − r²)² + (2ζr)²)), ωn = 2π·fn;  peak at r² = (√(1+8ζ²) − 1)/(4ζ²).  Symbols: fn natural frequency (Hz), ζ damping ratio, f forcing frequency (Hz), r frequency ratio, TR absolute-accel/base-accel gain.',
+    explain: ['Isolation only starts above r = √2: below that, the mount amplifies the base motion (TR > 1).',
+      'More damping lowers the resonant peak but raises TR above √2, so it hurts isolation. Pick ζ for the trade you need.',
+      'Relative displacement is what loads the spring (stroke, rattle space); it peaks near r = 1 and approaches the base displacement at high r.'],
+    assumptions: ['Single degree of freedom, linear, viscous damping, steady sinusoidal base acceleration.',
+      'TR is absolute acceleration over base acceleration; relative displacement is mass motion relative to the base.',
+      'Phase is response lag relative to base acceleration; peak TR is the closed-form peak of the TR curve (slightly above r = 1 for ζ > 0).'],
+    refs: 'Rao, Mechanical Vibrations, base excitation; Harris & Piersol, Shock and Vibration Handbook, Ch. 3.',
   },
 ];
