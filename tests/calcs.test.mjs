@@ -82,3 +82,9 @@ test('transmissibility vs scipy reference table', () => {
   }
   assert.throws(() => C.transmissibility({ fn: 10, zeta: 0, f: 5, baseG: 1 }));
 });
+
+test("transmissibility peak at tiny zeta has no cancellation", async () => {
+  const { transmissibility } = await import("../docs/calcs.js");
+  const t = transmissibility({ fn: 10, zeta: 1e-6, f: 10, baseG: 1 });
+  if (Math.abs(t.peak_TR - 5e5) / 5e5 > 1e-6) throw new Error("peak_TR " + t.peak_TR);
+});

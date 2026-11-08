@@ -161,7 +161,7 @@ export function transmissibility({ fn, zeta, f, baseG }) {
   const TR = Math.sqrt((1 + c * c) / (d * d + c * c));
   // H = (1 + j2ζr)/(1 - r² + j2ζr); atan2 keeps the denominator angle valid above r = 1.
   const phase_deg = (Math.atan2(c, 1) - Math.atan2(c, d)) * 180 / Math.PI;
-  const r2pk = (Math.sqrt(1 + 8 * zeta * zeta) - 1) / (4 * zeta * zeta);
+  const r2pk = 2 / (Math.sqrt(1 + 8 * zeta * zeta) + 1); // rationalized: no cancellation at small zeta
   const peak_TR = Math.sqrt((1 + 4 * zeta * zeta * r2pk) / ((1 - r2pk) ** 2 + 4 * zeta * zeta * r2pk));
   const wn = 2 * Math.PI * fn; // |z| = A_base / (wn² |1 - r² + j2ζr|)
   const rel_disp_mm = baseG * G0 / (wn * wn) / Math.sqrt(d * d + c * c) * 1000;
