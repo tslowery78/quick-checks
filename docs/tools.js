@@ -242,4 +242,44 @@ export const TOOLS = [
       'Phase is response lag relative to base acceleration; peak TR is the closed-form peak of the TR curve (slightly above r = 1 for ζ > 0).'],
     refs: 'Rao, Mechanical Vibrations, base excitation; Harris & Piersol, Shock and Vibration Handbook, Ch. 3.',
   },
+  {
+    id: 'logdec', title: 'Log decrement (free-decay damping)', group: 'Structural Dynamics',
+    blurb: 'Damping ratio from a ring-down: two peaks N cycles apart give δ, ζ, fn and Q.',
+    inputs: [
+      { key: 'fd', label: 'Ringing frequency fd (measured)', dim: 'frequency', unit: 'Hz', def: [10, 10] },
+      { key: 'x1', label: 'First peak x₁', dim: 'length', def: [0.4, 10] },
+      { key: 'xN', label: 'Peak N cycles later', dim: 'length', def: [0.083, 2.075] },
+      { key: 'N', label: 'Cycles between peaks N', dim: 'none', def: [5, 5] },
+    ],
+    outputs: [
+      { key: 'zeta', label: 'Damping ratio ζ', dim: 'none' },
+      { key: 'delta', label: 'Log decrement δ', dim: 'none' },
+      { key: 'fn', label: 'Undamped natural frequency fn', dim: 'frequency' },
+      { key: 'Q', label: 'Q = 1/(2ζ)', dim: 'none' },
+      { key: 'approx_err_pct', label: 'Error of ζ ≈ δ/2π (%)', dim: 'none' },
+      { key: 'n_half', label: 'Cycles to halve amplitude', dim: 'none' },
+      { key: 't_half', label: 'Time to halve amplitude', dim: 'time' },
+    ],
+    compute: (v) => C.logDecrement({ fd: v.fd, x1: v.x1, xN: v.xN, N: v.N }),
+    demo: (v, canvas) => {
+      const t = C.logDecrement({ fd: v.fd, x1: v.x1, xN: v.xN, N: v.N }), cmax = v.N + 1.5;
+      const cs = Array.from({ length: 1200 }, (_, i) => i * cmax / 1199);
+      const env = (sgn) => ({ faint: true, pts: cs.map(c => [c, sgn * Math.exp(-t.delta * c)]) });
+      drawPlot(canvas, {
+        xmin: 0, xmax: cmax, ymin: -1, ymax: 1,
+        xlabel: 'Cycles of ringing (t · fd)', ylabel: 'x / x₁',
+        curves: [env(1), env(-1), { pts: cs.map(c => [c, C.ringdown(t.delta, c)]) }],
+        vline: { x: v.N, label: `N = ${v.N}` },
+        point: { x: v.N, y: v.xN / v.x1 },
+      });
+    },
+    formula: 'δ = (1/N)·ln(x₁/x₁₊N);  ζ = δ/√(4π² + δ²);  fn = fd/√(1 − ζ²);  Q = 1/(2ζ);  cycles to halve = ln 2/δ.  Symbols: x₁ a positive peak, x₁₊N the positive peak N cycles later, δ log decrement, ζ damping ratio, fd measured ringing (damped) frequency, fn undamped natural frequency.',
+    explain: ['Each cycle the peaks shrink by the same factor e^−δ, so the log of the peak ratio per cycle gives δ, and δ ≈ 2πζ for light damping.',
+      'Measuring over many cycles (larger N) averages out noise on any single peak; the δ/2π shortcut is within 1% up to ζ ≈ 0.14.',
+      'If δ changes with amplitude along the decay, the damping is not viscous (friction or joints); report ζ at the amplitude you care about.'],
+    assumptions: ['Single mode, linear, viscous damping, free decay (no forcing during the ring-down).',
+      'Peaks are positive displacement (or acceleration) peaks of the same sign; the ratio is unit-free, so the unit only needs to match.',
+      'The plot shows release from rest normalized to x₁, in cycles of the ringing frequency.'],
+    refs: 'Rao, Mechanical Vibrations, logarithmic decrement; Thomson & Dahleh, Theory of Vibration, Ch. 2.',
+  },
 ];

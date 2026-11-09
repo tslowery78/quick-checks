@@ -18,3 +18,13 @@ test('transmissibility spec: SI in, SI out, matches scipy refs', () => {
     close(o.rel_disp, c.rel_disp_mm / 1000);  // m
   }
 });
+
+test('logdec spec: SI in (m), SI out, matches scipy refs', () => {
+  const spec = TOOLS.find(t => t.id === 'logdec');
+  const refs = JSON.parse(readFileSync(new URL('./refs/logdec.json', import.meta.url)));
+  for (const c of refs) {
+    const o = spec.compute({ fd: c.fd_hz, x1: c.x1_mm / 1000, xN: c.xN_mm / 1000, N: c.N });
+    close(o.zeta, c.zeta); close(o.fn, c.fn_hz); close(o.delta, c.delta); close(o.Q, c.Q);
+    close(o.n_half, c.n_half); close(o.t_half, c.t_half_s);   // s
+  }
+});

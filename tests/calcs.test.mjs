@@ -88,3 +88,20 @@ test("transmissibility peak at tiny zeta has no cancellation", async () => {
   const t = transmissibility({ fn: 10, zeta: 1e-6, f: 10, baseG: 1 });
   if (Math.abs(t.peak_TR - 5e5) / 5e5 > 1e-6) throw new Error("peak_TR " + t.peak_TR);
 });
+
+test('logDecrement recovers true zeta and fn from scipy ring-down peaks', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/logdec.json', import.meta.url)));
+  assert.ok(refs.length >= 5);
+  for (const q of refs) {
+    const got = C.logDecrement({ fd: q.fd_hz, x1: q.x1_mm, xN: q.xN_mm, N: q.N });
+    for (const [k, rk] of [['delta', 'delta'], ['zeta', 'zeta'], ['fn', 'fn_hz'], ['Q', 'Q'], ['zeta_approx', 'zeta_approx'], ['n_half', 'n_half'], ['t_half', 't_half_s']]) near(got[k], q[rk]);
+    assert.ok(Math.abs(got.approx_err_pct - q.approx_err_pct) <= 1e-6 * Math.max(1, Math.abs(q.approx_err_pct)), `err% ${got.approx_err_pct} vs ${q.approx_err_pct}`);
+    near(C.ringdown(got.delta, q.N), q.xN_mm / q.x1_mm);   // demo curve passes through the measured later peak
+  }
+  for (const bad of [{ fd: 0, x1: 1, xN: 0.5, N: 1 }, { fd: 10, x1: 1, xN: 1, N: 1 }, { fd: 10, x1: 1, xN: 2, N: 1 },
+    { fd: 10, x1: 1, xN: 0, N: 1 }, { fd: 10, x1: 1, xN: 0.5, N: 0 }, { fd: 10, x1: 1, xN: 0.5, N: 2.5 }])
+    assert.throws(() => C.logDecrement(bad), JSON.stringify(bad));
+  // tiny damping: approximation error must not cancel to 0 or go negative
+  const t = C.logDecrement({ fd: 100, x1: 1, xN: Math.exp(-2 * Math.PI * 1e-7), N: 1 });
+  assert.ok(t.approx_err_pct > 0 && Math.abs(t.zeta - 1e-7) / 1e-7 < 1e-6, JSON.stringify(t));
+});

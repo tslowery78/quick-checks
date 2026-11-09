@@ -167,3 +167,21 @@ export function transmissibility({ fn, zeta, f, baseG }) {
   const rel_disp_mm = baseG * G0 / (wn * wn) / Math.sqrt(d * d + c * c) * 1000;
   return { r, TR, phase_deg, resp_g: TR * baseG, rel_disp_mm, peak_TR };
 }
+
+// ---------- Structural dynamics: damped free vibration, log decrement (SDOF ring-down) ----------
+// Two positive peaks N cycles apart (any one length unit) and the ringing frequency fd (Hz).
+export function logDecrement({ fd, x1, xN, N }) {
+  if (!(fd > 0) || !(x1 > 0) || !(xN > 0) || !(xN < x1) || !Number.isInteger(N) || N < 1)
+    throw new Error('Need fd > 0, first peak > later peak > 0, and N a whole number of cycles ≥ 1.');
+  const delta = Math.log(x1 / xN) / N;
+  const u = (delta / (2 * Math.PI)) ** 2;           // (δ/2π)²
+  const zeta = delta / Math.sqrt(4 * Math.PI ** 2 + delta * delta);
+  const s = Math.sqrt(1 + u);                       // = 1/√(1−ζ²)
+  const n_half = Math.LN2 / delta;
+  return { delta, zeta, fn: fd * s, Q: 1 / (2 * zeta), zeta_approx: delta / (2 * Math.PI),
+    approx_err_pct: u / (s + 1) * 100,              // (δ/2π)/ζ − 1 = √(1+u) − 1, cancellation-free
+    n_half, t_half: n_half / fd };
+}
+
+// Release from rest, normalized: x/x1 after c damped cycles = e^(−δc)[cos 2πc + (δ/2π) sin 2πc].
+export const ringdown = (delta, c) => Math.exp(-delta * c) * (Math.cos(2 * Math.PI * c) + delta / (2 * Math.PI) * Math.sin(2 * Math.PI * c));

@@ -4,7 +4,7 @@ import re, sys
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:8765/'
-TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'units']
+TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'logdec', 'units']
 fails = []
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -36,6 +36,16 @@ with sync_playwright() as p:
     pg.locator('.row:has-text("Damping") input').fill('0.3'); pg.wait_for_timeout(100)
     if pg.evaluate(sig) == s0: fails.append(('transmissibility demo did not redraw',))
     pg.screenshot(path='screenshots/transmissibility-us.png', full_page=True)
+    pg.goto(BASE + '#/logdec'); pg.reload(); pg.wait_for_timeout(200)
+    n0 = pg.evaluate(NB); s0 = pg.evaluate(sig)
+    if n0 < 1000: fails.append(('logdec canvas blank', n0))
+    pg.locator('.row:has-text("Peak N cycles later") input').fill('0.2'); pg.wait_for_timeout(100)
+    if pg.evaluate(sig) == s0: fails.append(('logdec demo did not redraw',))
+    # refs/logdec.json case 2 by share link: page must show zeta 0.05, fn 10 Hz, Q 10, delta 0.3146
+    pg.goto(BASE + '#/logdec?fd=9.98749218~Hz&x1=10~mm&xN=2.07471041~mm&N=5'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.05', '0.3146', '10', '10', '0.1252', '2.204', '0.2206']: fails.append(('logdec ref case shown', shown))
+    pg.screenshot(path='screenshots/logdec-us.png', full_page=True)
     # Known values
     pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','us')")
     pg.goto(BASE + '#/psd'); pg.reload(); pg.wait_for_timeout(150)
