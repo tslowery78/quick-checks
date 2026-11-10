@@ -186,6 +186,27 @@ export function logDecrement({ fd, x1, xN, N }) {
 // Release from rest, normalized: x/x1 after c damped cycles = e^(−δc)[cos 2πc + (δ/2π) sin 2πc].
 export const ringdown = (delta, c) => Math.exp(-delta * c) * (Math.cos(2 * Math.PI * c) + delta / (2 * Math.PI) * Math.sin(2 * Math.PI * c));
 
+// Free response of ẍ + 2ζωn·ẋ + ωn²·x = 0 at time t (s) from x(0) = x0, ẋ(0) = v0; fn in Hz.
+// x comes back in x0's length unit and v in that unit per second. Drives the animated SDOF rig.
+// Closed form for ζ < 1, ζ = 1 and ζ > 1 (t ≥ 0); the ζ ≥ 1 branch is written on the slow root
+// so it neither overflows at large t nor cancels near ζ = 1.
+export function freeDecay(t, x0, v0, fn, zeta) {
+  if (!(fn > 0) || !(zeta >= 0) || !Number.isFinite(fn) || !Number.isFinite(zeta)) throw new Error('Need fn > 0 and ζ ≥ 0.');
+  if (![t, x0, v0].every(Number.isFinite) || t < 0) throw new Error('Need finite initial conditions and t ≥ 0.');
+  const wn = 2 * Math.PI * fn, a = zeta * wn;
+  let c, s;                                         // x = x0·c + (v0 + a·x0)·s, decay already folded in
+  if (zeta < 1) {
+    const wd = wn * Math.sqrt(1 - zeta * zeta), e = Math.exp(-a * t);
+    c = e * Math.cos(wd * t); s = e * Math.sin(wd * t) / wd;
+  } else {
+    const q = Math.sqrt(zeta * zeta - 1), b = wn * q;           // roots −a ± b
+    const e1 = Math.exp(-wn * t / (zeta + q));                  // slow root −a + b = −ωn/(ζ + √(ζ²−1))
+    c = e1 * (1 + Math.exp(-2 * b * t)) / 2;                    // e^(−at)·cosh(bt)
+    s = b > 0 ? e1 * -Math.expm1(-2 * b * t) / (2 * b) : e1 * t; // e^(−at)·sinh(bt)/b → t·e^(−ωn·t) at ζ = 1
+  }
+  return { x: x0 * c + (v0 + a * x0) * s, v: v0 * c - (a * v0 + wn * wn * x0) * s };
+}
+
 // ---------- Structural dynamics: half-power bandwidth damping (SDOF FRF peak) ----------
 // Peak frequency fr and the half-power frequencies f1 < fr < f2 (|H| = peak/√2), all Hz.
 // Exact ζ, fn assume an SDOF displacement (receptance) FRF: r² = 1 − 2ζ² ± 2ζ√(1 − ζ²) at f1, f2.

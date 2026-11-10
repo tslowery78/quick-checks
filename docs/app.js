@@ -16,6 +16,8 @@ const h = (tag, attrs = {}, ...kids) => {
 
 let sys = localStorage.getItem('unitSystem') || 'us';
 const main = $('#main');
+let disposeTool = () => {};
+const shakeBrand = () => h('div', { class: 'shakelab-brand' }, h('img', { src: 'assets/shakelab.png', alt: '' }), h('span', {}, 'ShakeLab', h('small', {}, 'Structural dynamics')));
 
 export function fmt(x) {
   if (!Number.isFinite(x)) return '—';
@@ -36,7 +38,7 @@ function renderHome() {
   main.replaceChildren(
     h('p', { class: 'lede' }, 'Fast, transparent hand-calc checks. Every tool shows its formula, assumptions, and source, and every result is a link you can share.'),
     ...groups.map(g => h('section', { class: 'group' },
-      h('h2', {}, g),
+      h('h2', {}, g === 'Structural Dynamics' ? shakeBrand() : g),
       h('div', { class: 'cards' }, TOOLS.filter(t => t.group === g).map(t =>
         h('a', { class: 'card', href: `#/${t.id}` }, h('strong', {}, t.title), h('span', {}, t.blurb)))))),
     h('section', { class: 'group' }, h('h2', {}, 'Utilities'),
@@ -113,6 +115,9 @@ function renderTool(tool, params) {
   const err = h('p', { class: 'error', role: 'alert' });
   const extra = h('div', {});
   const demoCanvas = tool.demo ? h('canvas', { class: 'demo', role: 'img', 'aria-label': `${tool.title} interactive plot` }) : null;
+  const simContainer = tool.sim ? h('section', { class: 'sim-panel', 'aria-label': 'ShakeLab free decay' }) : null;
+  let sim = null, ended = false, simParams = null;
+  disposeTool = () => { ended = true; sim?.dispose(); window.removeEventListener('resize', redraw); };
   let lastSI = null;
   const redraw = () => { if (demoCanvas && lastSI) tool.demo(lastSI, demoCanvas); };
   if (demoCanvas) { window.removeEventListener('resize', window.__demoResize); window.__demoResize = redraw; window.addEventListener('resize', redraw); }
@@ -149,6 +154,8 @@ function renderTool(tool, params) {
       h('tbody', {}, res._table.rows.map(r => h('tr', {}, r.map(c => h('td', {}, c)))))));
     last = { active, res };
     lastSI = bad || err.textContent ? null : si;
+    simParams = lastSI ? { fd: si.fd, zeta: res.zeta, fn: res.fn } : null;
+    sim?.update(simParams);
     if (demoCanvas) { demoCanvas.hidden = !lastSI; redraw(); }
     history.replaceState(null, '', shareHash());
   }
@@ -182,7 +189,7 @@ function renderTool(tool, params) {
     h('div', { class: 'grid' },
       h('fieldset', {}, h('legend', {}, 'Inputs'), fields.map(f => f.row)),
       h('fieldset', {}, h('legend', {}, 'Results'), outs.map(o => o.row), err, extra)),
-    demoCanvas,
+    simContainer, demoCanvas,
     tool.explain ? h('ul', { class: 'explain' }, tool.explain.map(t => h('li', {}, t))) : null,
     h('div', { class: 'actions' },
       h('button', { type: 'button', onclick: () => copy(location.href, 'Link copied') }, 'Copy link'),
@@ -193,11 +200,18 @@ function renderTool(tool, params) {
       h('ul', {}, tool.assumptions.map(a => h('li', {}, a))),
       h('p', { class: 'refs' }, tool.refs))));
   update();
+  if (simContainer) import('./sim/index.js').then(async ({ mountSim }) => {
+    if (ended) return;
+    const mounted = await mountSim(simContainer, { ...tool.sim, params: simParams });
+    if (ended) mounted.dispose(); else { sim = mounted; sim.update(simParams); }
+  }).catch(() => { if (!ended) simContainer.textContent = '3D view unavailable. Use the 2D ring-down chart below.'; });
 }
 
 const backLink = () => h('a', { class: 'back', href: '#/' }, '← All tools');
 
 function route() {
+  disposeTool(); disposeTool = () => {};
+  window.removeEventListener('resize', window.__demoResize);
   const [path, query] = location.hash.replace(/^#\/?/, '').split('?');
   const params = new URLSearchParams(query || '');
   const tool = TOOLS.find(t => t.id === path);

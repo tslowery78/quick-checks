@@ -243,7 +243,7 @@ export const TOOLS = [
     refs: 'Rao, Mechanical Vibrations, base excitation; Harris & Piersol, Shock and Vibration Handbook, Ch. 3.',
   },
   {
-    id: 'logdec', title: 'Log decrement (free-decay damping)', group: 'Structural Dynamics',
+    id: 'logdec', sim: { kind: 'sdofRig', drive: 'freeDecay' }, title: 'Log decrement (free-decay damping)', group: 'Structural Dynamics',
     blurb: 'Damping ratio from a ring-down: two peaks N cycles apart give δ, ζ, fn and Q.',
     inputs: [
       { key: 'fd', label: 'Ringing frequency fd (measured)', dim: 'frequency', unit: 'Hz', def: [10, 10] },

@@ -106,6 +106,56 @@ test('logDecrement recovers true zeta and fn from scipy ring-down peaks', () => 
   assert.ok(t.approx_err_pct > 0 && Math.abs(t.zeta - 1e-7) / 1e-7 < 1e-6, JSON.stringify(t));
 });
 
+test('freeDecay matches the scipy expm state-transition table (mm, mm/s)', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/motion_freedecay.json', import.meta.url)));
+  assert.equal(refs.length, 30);
+  const close = (got, want, what) => assert.ok(Math.abs(got - want) <= 1e-6 * Math.max(1, Math.abs(want)), `${what}: got ${got}, want ${want}`);
+  for (const q of refs) {
+    const got = C.freeDecay(q.t_s, q.x0_m * 1000, q.v0_mps * 1000, q.fn_hz, q.zeta);
+    const tag = `fn ${q.fn_hz} ζ ${q.zeta} t ${q.t_s}`;
+    close(got.x, q.x_m * 1000, `x ${tag}`);
+    close(got.v, q.v_mps * 1000, `v ${tag}`);
+  }
+});
+
+test('freeDecay at ζ = 1 and ζ = 2 matches an RK4 integration of the equation of motion', () => {
+  // Independent of the closed form: integrate ẍ = −2ζωn·ẋ − ωn²·x with classical RK4, h = 2 µs·(2 Hz/fn).
+  const rk4 = (tEnd, x0, v0, fn, zeta) => {
+    const wn = 2 * Math.PI * fn, f = (x, v) => -2 * zeta * wn * v - wn * wn * x;
+    const n = Math.round(tEnd * fn * 250000), h = tEnd / n;
+    let x = x0, v = v0;
+    for (let i = 0; i < n; i++) {
+      const k1x = v, k1v = f(x, v);
+      const k2x = v + h / 2 * k1v, k2v = f(x + h / 2 * k1x, v + h / 2 * k1v);
+      const k3x = v + h / 2 * k2v, k3v = f(x + h / 2 * k2x, v + h / 2 * k2v);
+      const k4x = v + h * k3v, k4v = f(x + h * k3x, v + h * k3v);
+      x += h / 6 * (k1x + 2 * k2x + 2 * k3x + k4x); v += h / 6 * (k1v + 2 * k2v + 2 * k3v + k4v);
+    }
+    return { x, v };
+  };
+  for (const zeta of [1, 2]) for (const [x0, v0] of [[10, 0], [-4, 300]]) for (const tEnd of [0.05, 0.2, 0.6]) {
+    const fn = 2, got = C.freeDecay(tEnd, x0, v0, fn, zeta), ref = rk4(tEnd, x0, v0, fn, zeta);
+    for (const k of ['x', 'v']) assert.ok(Math.abs(got[k] - ref[k]) <= 1e-6 * Math.abs(ref[k]), `ζ ${zeta} x0 ${x0} v0 ${v0} t ${tEnd} ${k}: got ${got[k]}, RK4 ${ref[k]}`);
+  }
+});
+
+test('freeDecay: branches meet at ζ = 1, peaks land on the log-decrement ratio, bad input throws', () => {
+  // continuity across the branch switch (each side is a different formula)
+  const lo = C.freeDecay(0.3, 10, -50, 2, 1 - 1e-9), mid = C.freeDecay(0.3, 10, -50, 2, 1), hi = C.freeDecay(0.3, 10, -50, 2, 1 + 1e-9);
+  for (const k of ['x', 'v']) { near(lo[k], mid[k], 1e-6); near(hi[k], mid[k], 1e-6); }
+  // heavy damping, long time: finite and decayed (cosh/sinh form would give ∞·0)
+  const far = C.freeDecay(500, 1, 0, 50, 5);
+  assert.ok(Number.isFinite(far.x) && Number.isFinite(far.v) && Math.abs(far.x) < 1e-6, JSON.stringify(far));
+  // released from rest, the positive peak N damped cycles later is xN/x1 of the scipy ring-down refs
+  for (const q of JSON.parse(readFileSync(new URL('./refs/logdec.json', import.meta.url)))) {
+    const r = C.freeDecay(q.N / q.fd_hz, 1, 0, q.fn_hz, q.zeta);
+    near(r.x, q.xN_mm / q.x1_mm);
+    assert.ok(Math.abs(r.v) <= 1e-6 * 2 * Math.PI * q.fn_hz, `peak velocity ${r.v}`);
+  }
+  assert.deepEqual(C.freeDecay(0, 3, -7, 10, 0.05), { x: 3, v: -7 });
+  for (const bad of [[0, 0.05], [-1, 0.05], [10, -0.1], [NaN, 0.05], [10, NaN], [Infinity, 0.05]]) assert.throws(() => C.freeDecay(0.1, 1, 0, ...bad), JSON.stringify(bad));
+});
+
 test('halfPower recovers true zeta and fn from scipy-measured FRF peak and -3 dB points', () => {
   const refs = JSON.parse(readFileSync(new URL('./refs/halfpower.json', import.meta.url)));
   assert.ok(refs.length >= 5);

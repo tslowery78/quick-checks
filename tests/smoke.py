@@ -71,6 +71,8 @@ with sync_playwright() as p:
     if pg.locator('.out output').first.inner_text() != d: fails.append(('unit switch changed result',))
     pg.goto(BASE); pg.screenshot(path='screenshots/home-us.png', full_page=True)
     b.close()
+    from sim_smoke import run_sim_checks
+    run_sim_checks(p)
 print('console errors:', errs)
 print('failures:', fails)
 sys.exit(1 if errs or fails else 0)
