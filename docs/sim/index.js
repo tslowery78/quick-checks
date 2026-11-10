@@ -10,16 +10,22 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
   let rig, ctx, disposed = false, visible = true, hostActive = true, raf = 0, previous = null, age = 0, time = 0, x0 = 0, x = 0, dragging = false, peaks = 0, flash = 0, frames = 0, ready = false, valid = true;
   let p, scale, width = 1, height = 1, canvas2d;
   function release(fraction = .3) {
-    if (disposed || !valid || !Number.isFinite(fraction)) return;
+    if (disposed) return;
+    dragging = false;
+    if (!valid || !Number.isFinite(fraction)) return;
     x0 = Math.max(-.4, Math.min(.4, fraction)) * 1.65; x = x0; time = 0; peaks = 0; flash = 0; dragging = false; onPeak(0); schedule();
   }
   function update(next) {
+    const wasValid = valid;
     valid = !!next && Number.isFinite(next.fd) && next.fd > 0 && Number.isFinite(next.zeta) && next.zeta >= 0 && next.zeta < 1;
     button.disabled = !valid;
-    if (!valid) { x0 = x = 0; hud.textContent = 'Enter valid calculator inputs'; return; }
+    if (!valid) {
+      dragging = false; x0 = x = time = peaks = flash = 0;
+      hud.textContent = 'Enter valid calculator inputs'; schedule(); return;
+    }
     const changed = p && (p.fd !== next.fd || p.zeta !== next.zeta);
     p = { ...next, fn: next.fn ?? next.fd / Math.sqrt(1 - next.zeta ** 2) };
-    scale = timeScale(p.fd); if (changed) release(.3); schedule();
+    scale = timeScale(p.fd); if (changed || !wasValid) release(.3); schedule();
   }
   function fallback(reason) {
     rig?.dispose(); rig = null;
@@ -45,7 +51,7 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
     if (canvas2d) { const d = Math.min(devicePixelRatio || 1, 2); canvas2d.width = width * d; canvas2d.height = height * d; }
     schedule();
   }
-  function schedule() { if (!disposed && visible && hostActive && !document.hidden && !raf && p) raf = requestAnimationFrame(frame); }
+  function schedule() { if (!disposed && visible && hostActive && !document.hidden && !raf && (rig || ctx)) raf = requestAnimationFrame(frame); }
   function frame(now) {
     raf = 0;
     if (disposed || !visible || !hostActive || document.hidden) { previous = null; return; }
@@ -85,7 +91,7 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
       const { createRig } = await import('./rig.js');
       if (!container.isConnected) { api.dispose(); return api; }
       rig = createRig(canvas, { reducedMotion, onFailure: fallback,
-        onPull(f) { dragging = true; x = x0 = f * 1.65; time = 0; peaks = 0; }, onRelease: () => release(x / 1.65) });
+        onPull(f) { if (disposed || !valid) return; dragging = true; x = x0 = f * 1.65; time = 0; peaks = 0; }, onRelease: () => release(x / 1.65) });
       resize(); schedule();
     }
   } catch (error) { fallback('3D could not start'); }

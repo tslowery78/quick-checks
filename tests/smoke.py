@@ -73,6 +73,8 @@ with sync_playwright() as p:
     b.close()
     from sim_smoke import run_sim_checks
     run_sim_checks(p)
+    from sim_invalid_smoke import run_invalid_checks
+    run_invalid_checks(p)
 print('console errors:', errs)
 print('failures:', fails)
 sys.exit(1 if errs or fails else 0)
