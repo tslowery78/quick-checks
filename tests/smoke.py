@@ -4,7 +4,7 @@ import re, sys
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:8765/'
-TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'logdec', 'units']
+TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'logdec', 'halfpower', 'units']
 fails = []
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -46,6 +46,16 @@ with sync_playwright() as p:
     shown = [o.inner_text() for o in pg.locator('.out output').all()]
     if shown != ['0.05', '0.3146', '10', '10', '0.1252', '2.204', '0.2206']: fails.append(('logdec ref case shown', shown))
     pg.screenshot(path='screenshots/logdec-us.png', full_page=True)
+    pg.goto(BASE + '#/halfpower'); pg.reload(); pg.wait_for_timeout(200)
+    n0 = pg.evaluate(NB); s0 = pg.evaluate(sig)
+    if n0 < 1000: fails.append(('halfpower canvas blank', n0))
+    pg.locator('.row:has-text("Upper half-power") input').fill('11'); pg.wait_for_timeout(100)
+    if pg.evaluate(sig) == s0: fails.append(('halfpower demo did not redraw',))
+    # refs/halfpower.json case 1 by share link
+    pg.goto(BASE + '#/halfpower?fr=9.97496867~Hz&f1=9.461105~Hz&f2=10.4636271~Hz'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.05025', '9.95', '1.003', '0.05', '0.5038', '10', '10.01']: fails.append(('halfpower ref case shown', shown))
+    pg.screenshot(path='screenshots/halfpower-us.png', full_page=True)
     # Known values
     pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','us')")
     pg.goto(BASE + '#/psd'); pg.reload(); pg.wait_for_timeout(150)

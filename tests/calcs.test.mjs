@@ -105,3 +105,17 @@ test('logDecrement recovers true zeta and fn from scipy ring-down peaks', () => 
   const t = C.logDecrement({ fd: 100, x1: 1, xN: Math.exp(-2 * Math.PI * 1e-7), N: 1 });
   assert.ok(t.approx_err_pct > 0 && Math.abs(t.zeta - 1e-7) / 1e-7 < 1e-6, JSON.stringify(t));
 });
+
+test('halfPower recovers true zeta and fn from scipy-measured FRF peak and -3 dB points', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/halfpower.json', import.meta.url)));
+  assert.ok(refs.length >= 5);
+  for (const q of refs) {
+    const got = C.halfPower({ fr: q.fr_hz, f1: q.f1_hz, f2: q.f2_hz });
+    for (const [k, rk] of [['df', 'df_hz'], ['Q', 'Q'], ['zeta_hp', 'zeta_hp'], ['zeta', 'zeta'], ['fn', 'fn_hz'], ['approx_err_pct', 'approx_err_pct'], ['peak_gain', 'peak_gain']]) near(got[k], q[rk]);
+    near(C.receptanceGain(got.fn, got.zeta, q.f1_hz) * Math.SQRT2, q.peak_gain);  // demo curve crosses peak/√2 at f1
+  }
+  for (const bad of [{ fr: 10, f1: 0, f2: 11 }, { fr: 10, f1: 10, f2: 11 }, { fr: 10, f1: 9, f2: 10 }, { fr: 10, f1: 11, f2: 12 }, { fr: 10, f1: 9, f2: Infinity }])
+    assert.throws(() => C.halfPower(bad), JSON.stringify(bad));
+  const t = C.halfPower({ fr: 100, f1: 100 * (1 - 1e-7), f2: 100 * (1 + 1e-7) });  // tiny damping: no cancellation
+  assert.ok(Math.abs(t.zeta - 1e-7) / 1e-7 < 1e-6, JSON.stringify(t));
+});

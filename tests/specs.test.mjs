@@ -28,3 +28,12 @@ test('logdec spec: SI in (m), SI out, matches scipy refs', () => {
     close(o.n_half, c.n_half); close(o.t_half, c.t_half_s);   // s
   }
 });
+
+test('halfpower spec: SI in (Hz), SI out, matches scipy refs', () => {
+  const spec = TOOLS.find(t => t.id === 'halfpower');
+  const refs = JSON.parse(readFileSync(new URL('./refs/halfpower.json', import.meta.url)));
+  for (const c of refs) {
+    const o = spec.compute({ fr: c.fr_hz, f1: c.f1_hz, f2: c.f2_hz });
+    close(o.zeta, c.zeta); close(o.fn, c.fn_hz); close(o.Q, c.Q); close(o.zeta_hp, c.zeta_hp); close(o.df, c.df_hz);
+  }
+});

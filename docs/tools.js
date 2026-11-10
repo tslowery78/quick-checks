@@ -282,4 +282,45 @@ export const TOOLS = [
       'The plot shows release from rest normalized to x₁, in cycles of the ringing frequency.'],
     refs: 'Rao, Mechanical Vibrations, logarithmic decrement; Thomson & Dahleh, Theory of Vibration, Ch. 2.',
   },
+  {
+    id: 'halfpower', title: 'Half-power bandwidth (Q from an FRF peak)', group: 'Structural Dynamics',
+    blurb: 'Damping from a measured resonance: peak frequency and the two −3 dB points give Q, ζ and fn.',
+    inputs: [
+      { key: 'fr', label: 'Peak frequency fr', dim: 'frequency', unit: 'Hz', def: [9.975, 9.975] },
+      { key: 'f1', label: 'Lower half-power f₁', dim: 'frequency', unit: 'Hz', def: [9.461, 9.461] },
+      { key: 'f2', label: 'Upper half-power f₂', dim: 'frequency', unit: 'Hz', def: [10.464, 10.464] },
+    ],
+    outputs: [
+      { key: 'zeta_hp', label: 'Damping ζ ≈ Δf/(2fr)', dim: 'none' },
+      { key: 'Q', label: 'Q = fr/Δf', dim: 'none' },
+      { key: 'df', label: 'Bandwidth Δf = f₂ − f₁', dim: 'frequency' },
+      { key: 'zeta', label: 'Exact SDOF ζ (from f₁, f₂)', dim: 'none' },
+      { key: 'approx_err_pct', label: 'Error of Δf/(2fr) (%)', dim: 'none' },
+      { key: 'fn', label: 'Undamped natural frequency fn', dim: 'frequency' },
+      { key: 'peak_gain', label: 'Peak gain k|X/F| = 1/(2ζ√(1−ζ²))', dim: 'none' },
+    ],
+    compute: (v) => C.halfPower({ fr: v.fr, f1: v.f1, f2: v.f2 }),
+    demo: (v, canvas) => {
+      const t = C.halfPower({ fr: v.fr, f1: v.f1, f2: v.f2 }), hp = t.peak_gain / Math.SQRT2;
+      const lo = Math.max(0, v.fr - 2.5 * t.df), hi = v.fr + 2.5 * t.df, ymax = t.peak_gain * 1.15;
+      const fs = Array.from({ length: 800 }, (_, i) => lo + (hi - lo) * i / 799);
+      const vert = (x) => ({ guide: true, pts: [[x, 0], [x, hp]] });
+      drawPlot(canvas, {
+        xmin: lo, xmax: hi, ymin: 0, ymax,
+        xlabel: 'Frequency f (Hz)', ylabel: 'Gain k|X/F|',
+        curves: [{ guide: true, label: 'peak/√2', pts: [[lo, hp], [hi, hp]] }, vert(v.f1), vert(v.f2),
+          { pts: fs.map(f => [f, C.receptanceGain(t.fn, t.zeta, f)]) }],
+        vline: { x: v.fr, label: 'fr' },
+        point: { x: v.fr, y: C.receptanceGain(t.fn, t.zeta, v.fr) },
+      });
+    },
+    formula: 'Δf = f₂ − f₁;  Q = fr/Δf;  ζ ≈ Δf/(2fr) = 1/(2Q).  Exact SDOF receptance: ρ = (f₂² − f₁²)/(f₁² + f₂²), ζ² = (1 − 1/√(1+ρ²))/2, fn² = (f₁² + f₂²)/(2(1 − 2ζ²)).  Symbols: fr frequency of the FRF peak, f₁ and f₂ the frequencies where the FRF magnitude is peak/√2 (−3 dB, half the power), ζ damping ratio, fn undamped natural frequency, Q quality factor.',
+    explain: ['A lightly damped resonance is a narrow spike; its width at peak/√2 is 2ζ times its frequency, so Δf/(2fr) reads ζ straight off the FRF.',
+      'The shortcut overestimates ζ as damping grows: about 0.5% high at ζ = 0.05, 9% at 0.2. The exact line fixes it for a clean SDOF peak.',
+      'Need a fine frequency step: if only 2-3 points span Δf, the bandwidth (and ζ) is set by the resolution, not the structure.'],
+    assumptions: ['One well-separated mode, linear, viscous damping; read f₁, f₂ on the FRF magnitude (not dB of power) at peak/√2.',
+      'Exact ζ and fn assume a displacement (receptance) FRF; for a mobility (velocity) FRF Δf/(2fn) is already exact.',
+      'The plot is the SDOF receptance rebuilt from the exact ζ and fn, centred on fr.'],
+    refs: 'Ewins, Modal Testing, half-power point method; Rao, Mechanical Vibrations, quality factor and bandwidth.',
+  },
 ];

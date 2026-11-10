@@ -3,7 +3,7 @@
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 export function drawPlot(canvas, o) {
-  // o: {xlog, ylog, xmin, xmax, ymin, ymax, xlabel, ylabel, curves:[{pts,faint,label}], vline:{x,label}, point:{x,y}}
+  // o: {xlog, ylog, xmin, xmax, ymin, ymax, xlabel, ylabel, curves:[{pts,faint,guide,label}], vline:{x,label}, point:{x,y}}
   const dpr = window.devicePixelRatio || 1;
   const W = canvas.clientWidth, H = canvas.clientHeight;
   if (!W || !H) return;
@@ -39,11 +39,12 @@ export function drawPlot(canvas, o) {
   }
   for (const c of o.curves) {
     g.beginPath(); c.pts.forEach(([x, y], i) => (i ? g.lineTo(X(x), Y(y)) : g.moveTo(X(x), Y(y))));
-    g.strokeStyle = c.faint ? line : accent; g.lineWidth = c.faint ? 1.5 : 3; g.globalAlpha = c.faint ? 1 : 1; g.stroke();
+    g.setLineDash(c.guide ? [5, 4] : []); // guide: dashed muted reference line (e.g. a half-power level)
+    g.strokeStyle = c.guide ? muted : c.faint ? line : accent; g.lineWidth = c.guide ? 1.5 : c.faint ? 1.5 : 3; g.stroke(); g.setLineDash([]);
   }
   g.restore();
   g.lineWidth = 1;
-  for (const c of o.curves) if (c.faint && c.label) { // label each faint curve at its right end
+  for (const c of o.curves) if ((c.faint || c.guide) && c.label) { // label each faint curve at its right end
     const [x, y] = c.pts[c.pts.length - 1];
     g.fillStyle = muted; g.font = '11px system-ui, sans-serif'; g.textAlign = 'right'; g.textBaseline = 'bottom'; g.fillText(c.label, X(x) - 2, Y(y) - 1);
   }

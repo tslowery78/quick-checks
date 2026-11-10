@@ -185,3 +185,21 @@ export function logDecrement({ fd, x1, xN, N }) {
 
 // Release from rest, normalized: x/x1 after c damped cycles = e^(−δc)[cos 2πc + (δ/2π) sin 2πc].
 export const ringdown = (delta, c) => Math.exp(-delta * c) * (Math.cos(2 * Math.PI * c) + delta / (2 * Math.PI) * Math.sin(2 * Math.PI * c));
+
+// ---------- Structural dynamics: half-power bandwidth damping (SDOF FRF peak) ----------
+// Peak frequency fr and the half-power frequencies f1 < fr < f2 (|H| = peak/√2), all Hz.
+// Exact ζ, fn assume an SDOF displacement (receptance) FRF: r² = 1 − 2ζ² ± 2ζ√(1 − ζ²) at f1, f2.
+export function halfPower({ fr, f1, f2 }) {
+  if (!(f1 > 0) || !(fr > f1) || !(f2 > fr) || !Number.isFinite(f2))
+    throw new Error('Need 0 < f1 < fr < f2 (half-power frequencies either side of the peak).');
+  const df = f2 - f1, zeta_hp = df / (2 * fr);
+  const rho = (f2 - f1) * (f2 + f1) / (f1 * f1 + f2 * f2);  // (f2² − f1²)/(f1² + f2²) = 2ζ√(1−ζ²)/(1−2ζ²)
+  const q = Math.sqrt(1 + rho * rho);
+  const z2 = rho * rho / (2 * q * (q + 1));                 // (1 − 1/q)/2 without cancellation
+  const zeta = Math.sqrt(z2);
+  return { df, Q: fr / df, zeta_hp, zeta, fn: Math.sqrt((f1 * f1 + f2 * f2) / (2 * (1 - 2 * z2))),
+    approx_err_pct: (zeta_hp / zeta - 1) * 100, peak_gain: 1 / (2 * zeta * Math.sqrt(1 - z2)) };
+}
+
+// SDOF receptance gain k|X/F| at frequency f (Hz).
+export const receptanceGain = (fn, zeta, f) => { const r = f / fn; return 1 / Math.sqrt((1 - r * r) ** 2 + (2 * zeta * r) ** 2); };
