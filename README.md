@@ -43,12 +43,12 @@ Verification (from this repository; keep Python/browser caches in the task folde
 ```sh
 python3 -m venv .venv
 .venv/bin/pip install scipy pillow playwright
-PLAYWRIGHT_BROWSERS_PATH="$PWD/verification/browsers" .venv/bin/python -m playwright install chromium
+PLAYWRIGHT_BROWSERS_PATH="$PWD/build/browsers" .venv/bin/python -m playwright install chromium
 npm test
 .venv/bin/python tests/verify_physics.py
 python3 -m http.server 8765 -d docs
 # In another shell:
-PLAYWRIGHT_BROWSERS_PATH="$PWD/verification/browsers" .venv/bin/python tests/smoke.py
+PLAYWRIGHT_BROWSERS_PATH="$PWD/build/browsers" .venv/bin/python tests/smoke.py
 ```
 
 `verify_physics.py` independently recomputes all 30 supplied reference rows and compares 405

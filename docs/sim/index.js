@@ -3,7 +3,7 @@ import { webglOK, timeScale, timeLabel } from './support.js';
 
 export async function mountSim(container, { kind, drive, params, reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches, onReady = () => {}, onPeak = () => {} }) {
   if (kind !== 'sdofRig' || drive !== 'freeDecay') throw new Error('Unknown simulation');
-  container.innerHTML = `<div class="sim-heading"><span>ShakeLab <small>FREE DECAY</small></span><span class="sim-mode">Loading rig…</span></div><div class="sim-stage"><canvas class="sim" aria-label="Spring and mass. Drag the teal block to release; drag empty space to orbit." role="img"></canvas><div class="sim-hud"></div></div><p class="sim-hint">Drag the block · orbit the space · pinch to zoom</p><button type="button" id="sim-release">↧ Bounce it</button>`;
+  container.innerHTML = `<div class="sim-heading"><span>ShakeLab <small>DISPLACEMENT NOT TO SCALE</small></span><span class="sim-mode">Loading rig…</span></div><div class="sim-stage"><canvas class="sim" aria-label="Spring and mass. Drag the teal block to release; drag empty space to orbit." role="img"></canvas><div class="sim-hud"></div></div><p class="sim-hint">Drag the block · orbit the space · pinch to zoom</p><button type="button" id="sim-release">↧ Bounce it</button>`;
   const canvas = container.querySelector('canvas'), hud = container.querySelector('.sim-hud');
   const mode = container.querySelector('.sim-mode'), button = container.querySelector('button');
   const stage = container.querySelector('.sim-stage');
@@ -11,7 +11,7 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
   let p, scale, width = 1, height = 1, canvas2d;
   function release(fraction = .3) {
     if (disposed || !valid || !Number.isFinite(fraction)) return;
-    x0 = Math.max(-.4, Math.min(.4, fraction)) * 1.65; x = x0; time = 0; peaks = 0; flash = 0; dragging = false; schedule();
+    x0 = Math.max(-.4, Math.min(.4, fraction)) * 1.65; x = x0; time = 0; peaks = 0; flash = 0; dragging = false; onPeak(0); schedule();
   }
   function update(next) {
     valid = !!next && Number.isFinite(next.fd) && next.fd > 0 && Number.isFinite(next.zeta) && next.zeta >= 0 && next.zeta < 1;
