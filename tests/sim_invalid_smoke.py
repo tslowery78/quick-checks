@@ -14,8 +14,10 @@ def run_invalid_checks(p):
         snapshot = lambda: page.evaluate("document.querySelector('.sim-panel').__sim.snapshot()")
         try:
             page.goto(BASE + ('#/logdec' if case == 'invalid_drag_recovery' else '#/logdec?x1=1&xN=2'))
-            page.locator('.sim-panel').scroll_into_view_if_needed()
             page.wait_for_function("!!document.querySelector('.sim-panel')?.__sim")
+            # The async mount gives the initially empty panel its height. Scroll afterward.
+            page.locator('.sim-panel').scroll_into_view_if_needed()
+            page.wait_for_function("document.querySelector('.sim-panel').__sim.snapshot().visible")
             if case == 'invalid_drag_recovery':
                 page.wait_for_function("document.querySelector('.sim-panel').dataset.renderer === 'webgl'")
                 field = page.locator('.row:has-text("First peak") input')
