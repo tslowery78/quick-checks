@@ -91,6 +91,7 @@ with sync_playwright() as p:
     run_driven_checks(p, 'forced_daf', 'forced')
     from sim_invalid_smoke import run_invalid_checks
     run_invalid_checks(p)
+    run_driven_checks(p, 'transmissibility', 'base')
 print('console errors:', errs)
 print('failures:', fails)
 sys.exit(1 if errs or fails else 0)

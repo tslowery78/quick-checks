@@ -205,7 +205,7 @@ export const TOOLS = [
     refs: 'Shigley Ch. 3.',
   },
   {
-    id: 'transmissibility', title: 'Base-excitation transmissibility', group: 'Structural Dynamics',
+    id: 'transmissibility', sim: { kind: 'sdofRig', drive: 'base' }, title: 'Base-excitation transmissibility', group: 'Structural Dynamics',
     blurb: 'SDOF on a shaking base: absolute-acceleration gain, phase, response in g, and relative displacement.',
     inputs: [
       { key: 'fn', label: 'Natural frequency fn', dim: 'frequency', unit: 'Hz', def: [10, 10] },

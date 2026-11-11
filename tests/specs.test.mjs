@@ -17,6 +17,7 @@ test('transmissibility spec: SI in, SI out, matches scipy refs', () => {
     close(o.resp_g, c.resp_g * G0);           // m/s²
     close(o.rel_disp, c.rel_disp_mm / 1000);  // m
   }
+  assert.deepEqual(spec.sim, { kind: 'sdofRig', drive: 'base' });   // scene: base plate and mass in the ground frame
 });
 
 test('logdec spec: SI in (m), SI out, matches scipy refs', () => {
