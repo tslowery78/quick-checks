@@ -169,3 +169,112 @@ test('halfPower recovers true zeta and fn from scipy-measured FRF peak and -3 dB
   const t = C.halfPower({ fr: 100, f1: 100 * (1 - 1e-7), f2: 100 * (1 + 1e-7) });  // tiny damping: no cancellation
   assert.ok(Math.abs(t.zeta - 1e-7) / 1e-7 < 1e-6, JSON.stringify(t));
 });
+
+// ---------- Driven rig: closed-form responses from rest (drive the forced and base scenes) ----------
+const motion = JSON.parse(readFileSync(new URL('./refs/motion_forced.json', import.meta.url)));
+const within = (got, want, tol, what) => assert.ok(Math.abs(got - want) <= tol, `${what}: got ${got}, want ${want}`);
+// Steady-state amplitude and phase of a response component, fitted over one late forcing cycle.
+function steadyFit(sample, fn, zeta, f) {
+  const slow = 2 * Math.PI * fn * (zeta < 1 ? zeta : 1 / (zeta + Math.sqrt(zeta * zeta - 1)));  // slowest transient decay rate
+  const t0 = Math.ceil(40 / slow * f) / f, n = 400; let s = 0, c = 0;                           // transient < e^-40
+  for (let i = 0; i < n; i++) { const t = t0 + i / (n * f), v = sample(t); s += v * Math.sin(2 * Math.PI * f * t); c += v * Math.cos(2 * Math.PI * f * t); }
+  return { amp: 2 * Math.hypot(s, c) / n, lag_deg: Math.atan2(-c, s) * 180 / Math.PI };      // v = amp·sin(ωt − lag)
+}
+
+test('forcedResponse matches every row of the scipy lsim table (normalized by x_static)', () => {
+  let rows = 0;
+  for (const c of motion) for (const row of c.rows) { within(C.forcedResponse(row.t, c.fn_hz, c.zeta, c.f_hz).x, row.force_x, 1e-5, `fn ${c.fn_hz} ζ ${c.zeta} f ${c.f_hz} t ${row.t}`); rows++; }
+  assert.equal(rows, 125);
+});
+
+test('forcedResponse: rest start in every damping branch, velocity is the derivative, branches meet at ζ = 1', () => {
+  for (const z of [0, 0.05, 1 - 1e-9, 1, 1 + 1e-9, 2, 20]) for (const f of [0.3, 3, 9]) {   // f = fn at ζ = 0 has no steady state (throws, below)
+    const o = C.forcedResponse(0, 2, z, f); within(o.x, 0, 1e-12, 'x(0)'); within(o.v, 0, 1e-9, 'v(0)');
+  }
+  for (const z of [0.05, 1, 3]) for (const t of [0.13, 0.9, 4]) {
+    const h = 1e-6, num = (C.forcedResponse(t + h, 2, z, 3).x - C.forcedResponse(t - h, 2, z, 3).x) / (2 * h);
+    within(C.forcedResponse(t, 2, z, 3).v, num, 1e-6 * Math.max(1, Math.abs(num)), `v at ζ ${z} t ${t}`);
+  }
+  for (const t of [0.05, 0.4, 2]) within(C.forcedResponse(t, 2, 1 - 1e-9, 3).x, C.forcedResponse(t, 2, 1 + 1e-9, 3).x, 1e-7, 'ζ → 1');
+  // ζ = 1 and ζ = 2 against an RK4 integration of ẍ + 2ζωn·ẋ + ωn²·x = ωn²·sin(ωt)
+  for (const z of [1, 2]) {
+    const fn = 2, f = 3, wn = 2 * Math.PI * fn, w = 2 * Math.PI * f, acc = (t, x, v) => wn * wn * Math.sin(w * t) - 2 * z * wn * v - wn * wn * x;
+    let x = 0, v = 0, t = 0; const dt = 1e-4;
+    for (let i = 0; i < 10000; i++) {
+      const k1x = v, k1v = acc(t, x, v), k2x = v + dt / 2 * k1v, k2v = acc(t + dt / 2, x + dt / 2 * k1x, v + dt / 2 * k1v);
+      const k3x = v + dt / 2 * k2v, k3v = acc(t + dt / 2, x + dt / 2 * k2x, v + dt / 2 * k2v), k4x = v + dt * k3v, k4v = acc(t + dt, x + dt * k3x, v + dt * k3v);
+      x += dt / 6 * (k1x + 2 * k2x + 2 * k3x + k4x); v += dt / 6 * (k1v + 2 * k2v + 2 * k3v + k4v); t += dt;
+    }
+    within(C.forcedResponse(1, fn, z, f).x, x, 1e-8, `RK4 ζ ${z}`);
+  }
+  for (const args of [[-1, 2, .1, 3], [1, 0, .1, 3], [1, 2, -0.1, 3], [1, 2, .1, 0], [NaN, 2, .1, 3], [1, 2, 0, 2]]) assert.throws(() => C.forcedResponse(...args));
+});
+
+test('forced drive limits: 1/(2ζ) at resonance, static follow at low r, 1/r² and 180° at high r', () => {
+  for (const zeta of [0.01, 0.02, 0.05]) {            // r = 1: amplitude 1/(2ζ), lag 90°
+    const fit = steadyFit(t => C.forcedResponse(t, 2, zeta, 2).x, 2, zeta, 2);
+    within(fit.amp, 1 / (2 * zeta), 1e-6 / zeta, `resonant amplitude ζ ${zeta}`); within(fit.lag_deg, 90, 1e-6, 'resonant lag');
+  }
+  // Resonant build-up hand check: x ≈ −(1/2ζ)(1 − e^(−ζωn·t))·cos(ωn·t) for small ζ; peaks sit on whole cycles.
+  { const zeta = 0.02, fn = 2, t = 10 / fn; within(Math.abs(C.forcedResponse(t, fn, zeta, fn).x), (1 - Math.exp(-zeta * 2 * Math.PI * fn * t)) / (2 * zeta), 0.02 / (2 * zeta), 'build-up envelope'); }
+  for (const t of [3.1, 7.77, 12.4]) within(C.forcedResponse(200 + t, 50, 0.3, 0.05).x, Math.sin(2 * Math.PI * 0.05 * (200 + t)), 2e-3, 'static follow x → sin ωt'); // r = 0.001
+  { const fit = steadyFit(t => C.forcedResponse(t, 50, 0.3, 0.05).x, 50, 0.3, 0.05); within(fit.amp, 1, 1e-5, 'DAF → 1'); within(fit.lag_deg, 0, 0.05, 'lag → 0'); }
+  for (const r of [10, 30]) {                           // amplitude ≈ 1/r² (exactly 1/(r² − 1) at ζ → 0), lag → 180°
+    const fit = steadyFit(t => C.forcedResponse(t, 1, 0.05, r).x, 1, 0.05, r);
+    within(fit.amp * r * r, 1, 2 / (r * r), `1/r² at r ${r}`); assert.ok(fit.lag_deg > 179 && fit.lag_deg <= 180, `lag ${fit.lag_deg}`);
+  }
+});
+
+test('baseResponse matches every row of the scipy lsim table (base y, absolute x, relative z; normalized by Y)', () => {
+  let rows = 0;
+  for (const c of motion) for (const row of c.rows) {
+    const o = C.baseResponse(row.t, c.fn_hz, c.zeta, c.f_hz), at = `fn ${c.fn_hz} ζ ${c.zeta} f ${c.f_hz} t ${row.t}`;
+    within(o.y, row.base_y, 1e-5, `y ${at}`); within(o.x, row.base_x, 1e-5, `x ${at}`); within(o.z, row.base_rel, 1e-5, `z ${at}`); rows++;
+  }
+  assert.equal(rows, 125);
+});
+
+test('baseResponse initial conditions: mass at rest, base at y = 0 moving at ω; x = y + z; RK4 at ζ = 1 and 2', () => {
+  for (const z of [0, 0.05, 1 - 1e-9, 1, 1 + 1e-9, 2, 20]) for (const f of [0.3, 3, 9]) {
+    const fn = 2, wn = 2 * Math.PI * fn, w = 2 * Math.PI * f, h = 1e-7;
+    const a = C.baseResponse(0, fn, z, f), b = C.baseResponse(h, fn, z, f), c = C.baseResponse(2 * h, fn, z, f);
+    assert.deepEqual([a.y, a.x, a.z], [0, 0, 0]);
+    within(b.y / h, w, 1e-6 * w, 'ẏ(0) = ω');
+    // Mass starts with zero velocity and the damper's kick: x ≈ ½·ẍ(0)·t², ẍ(0) = 2ζωn·ω.
+    within(b.x, 0.5 * 2 * z * wn * w * h * h, 1e-9 + 1e-3 * z * wn * w * h * h, `ẋ(0) = 0 at ζ ${z}`);
+    within((c.x - 2 * b.x + a.x) / (h * h), 2 * z * wn * w, 1e-2 * Math.max(1, z * wn * w), `ẍ(0) at ζ ${z}`);
+  }
+  for (const t of [0.07, 0.5, 3.3]) { const o = C.baseResponse(t, 2, 0.1, 5); within(o.x - o.y, o.z, 1e-15, 'z = x − y'); }
+  // Absolute equation of motion ẍ + 2ζωn·ẋ + ωn²·x = 2ζωn·ẏ + ωn²·y, integrated from x = ẋ = 0.
+  for (const z of [0.05, 1, 2]) {
+    const fn = 2, f = 3, wn = 2 * Math.PI * fn, w = 2 * Math.PI * f;
+    const acc = (t, x, v) => 2 * z * wn * w * Math.cos(w * t) + wn * wn * Math.sin(w * t) - 2 * z * wn * v - wn * wn * x;
+    let x = 0, v = 0, t = 0; const dt = 1e-4;
+    for (let i = 0; i < 10000; i++) {
+      const k1x = v, k1v = acc(t, x, v), k2x = v + dt / 2 * k1v, k2v = acc(t + dt / 2, x + dt / 2 * k1x, v + dt / 2 * k1v);
+      const k3x = v + dt / 2 * k2v, k3v = acc(t + dt / 2, x + dt / 2 * k2x, v + dt / 2 * k2v), k4x = v + dt * k3v, k4v = acc(t + dt, x + dt * k3x, v + dt * k3v);
+      x += dt / 6 * (k1x + 2 * k2x + 2 * k3x + k4x); v += dt / 6 * (k1v + 2 * k2v + 2 * k3v + k4v); t += dt;
+    }
+    within(C.baseResponse(1, fn, z, f).x, x, 1e-8, `RK4 ζ ${z}`);
+  }
+  for (const args of [[-1, 2, .1, 3], [1, 0, .1, 3], [1, 2, -0.1, 3], [1, 2, .1, 0], [NaN, 2, .1, 3], [1, 2, 0, 2]]) assert.throws(() => C.baseResponse(...args));
+});
+
+test('base drive limits: x → y at low r, TR = 1 at r = √2 for any ζ, small TR at high r, steady state = transmissibility()', () => {
+  for (const t of [3.1, 7.77, 12.4]) { const o = C.baseResponse(200 + t, 50, 0.3, 0.05); within(o.x, o.y, 1e-5, 'rigid follow x → y'); within(o.z, 0, 1e-5, 'no stretch'); } // r = 0.001
+  for (const zeta of [0.01, 0.1, 0.5, 1, 3]) {          // crossover: mass and base amplitudes equal
+    const fit = steadyFit(t => C.baseResponse(t, 2, zeta, 2 * Math.SQRT2).x, 2, zeta, 2 * Math.SQRT2);
+    within(fit.amp, 1, 1e-9, `TR at √2, ζ ${zeta}`);
+  }
+  for (const r of [10, 30]) {                           // isolation: TR ≈ √(1 + (2ζr)²)/r², well below 1
+    const fit = steadyFit(t => C.baseResponse(t, 1, 0.05, r).x, 1, 0.05, r);
+    within(fit.amp, Math.hypot(1, 0.1 * r) / (r * r), 2 / r ** 4 * Math.hypot(1, 0.1 * r), `TR at r ${r}`); assert.ok(fit.amp < 0.02);
+  }
+  { const fit = steadyFit(t => C.baseResponse(t, 2, 0.05, 2).x, 2, 0.05, 2); within(fit.amp, Math.hypot(1, 0.1) / 0.1, 1e-8, 'TR at r = 1 is √(1 + 4ζ²)/(2ζ)'); }
+  for (const [zeta, r] of [[0.05, 0.5], [0.05, 1], [0.1, 2], [0.5, 1.2], [1.5, 0.8]]) {
+    const o = C.transmissibility({ fn: 3, zeta, f: 3 * r, baseG: 1 });
+    const abs = steadyFit(t => C.baseResponse(t, 3, zeta, 3 * r).x, 3, zeta, 3 * r), rel = steadyFit(t => C.baseResponse(t, 3, zeta, 3 * r).z, 3, zeta, 3 * r);
+    near(abs.amp, o.TR, 1e-9); within(-abs.lag_deg, o.phase_deg, 1e-7, 'phase');             // phase_deg is negative for lag
+    near(rel.amp, r * r / Math.hypot(1 - r * r, 2 * zeta * r), 1e-9);                          // |z|/Y = r²·D
+  }
+});

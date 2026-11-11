@@ -207,6 +207,41 @@ export function freeDecay(t, x0, v0, fn, zeta) {
   return { x: x0 * c + (v0 + a * x0) * s, v: v0 * c - (a * v0 + wn * wn * x0) * s };
 }
 
+// ---------- ShakeLab scene drives: SDOF from rest under a sine force or a sine base motion ----------
+// Pure closed forms played by docs/sim. Hz in, normalized motion out; t in seconds of physical time.
+function driveTerms(t, fn, zeta, f) {
+  if (!(fn > 0) || !(f > 0) || !(zeta >= 0) || ![t, fn, zeta, f].every(Number.isFinite) || t < 0)
+    throw new Error('Need fn > 0, f > 0, ζ ≥ 0 and t ≥ 0.');
+  const r = f / fn, c = 2 * zeta * r, d = 1 - r * r, den = d * d + c * c;
+  if (!(den > 0)) throw new Error('Undamped resonance (ζ = 0, f = fn) has no steady state.');
+  const w = 2 * Math.PI * f;
+  return { r, c, d, D2: 1 / den, w, sin: Math.sin(w * t), cos: Math.cos(w * t) };
+}
+
+// Force-driven rig from rest. ẍ + 2ζωn·ẋ + ωn²·x = ωn²·sin(ωt), x(0) = ẋ(0) = 0, so x is in units of
+// x_static = F0/k and v in x_static per second. Closed form = steady state + free transient:
+//   x_ss = D²[(1 − r²)·sin ωt − 2ζr·cos ωt],  D² = 1/((1 − r²)² + (2ζr)²)   (= DAF·sin(ωt − φ))
+//   x = x_ss(t) + freeDecay(t, −x_ss(0), −ẋ_ss(0)),  which covers ζ < 1, ζ = 1 and ζ > 1.
+export function forcedResponse(t, fn, zeta, f) {
+  const { c, d, D2, w, sin, cos } = driveTerms(t, fn, zeta, f);
+  const h = freeDecay(t, c * D2, -w * d * D2, fn, zeta);
+  return { x: D2 * (d * sin - c * cos) + h.x, v: w * D2 * (d * cos + c * sin) + h.v };
+}
+
+// Base-driven rig in the ground frame, in units of the base amplitude Y: base y = sin(ωt), mass absolute x,
+// spring stretch z = x − y. Initial conditions (they match scipy lsim of X/Y = (2ζωn·s + ωn²)/(s² + 2ζωn·s + ωn²)
+// from zero state): the mass starts at rest, x(0) = 0 and ẋ(0) = 0, while the base starts at y(0) = 0 already
+// moving at ẏ(0) = ω. So z(0) = 0, ż(0) = −ω, and the damper gives the mass ẍ(0) = 2ζωn·ω.
+// Relative motion obeys z̈ + 2ζωn·ż + ωn²·z = −ÿ = ω²·sin(ωt):
+//   z_ss = r²D²[(1 − r²)·sin ωt − 2ζr·cos ωt],  z = z_ss(t) + freeDecay(t, −z_ss(0), −ω − ż_ss(0)),  x = y + z.
+export function baseResponse(t, fn, zeta, f) {
+  const { r, c, d, D2, w, sin, cos } = driveTerms(t, fn, zeta, f);
+  const g = r * r * D2;
+  const h = freeDecay(t, g * c, -w - w * g * d, fn, zeta);
+  const z = g * (d * sin - c * cos) + h.x;
+  return { y: sin, x: sin + z, z };
+}
+
 // ---------- Structural dynamics: half-power bandwidth damping (SDOF FRF peak) ----------
 // Peak frequency fr and the half-power frequencies f1 < fr < f2 (|H| = peak/√2), all Hz.
 // Exact ζ, fn assume an SDOF displacement (receptance) FRF: r² = 1 − 2ζ² ± 2ζ√(1 − ζ²) at f1, f2.

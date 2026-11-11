@@ -17,7 +17,7 @@ One concept per day (group "Structural Dynamics"; shared with the iOS app, see t
 2. Spec: add an entry to `docs/tools.js` with `group: 'Structural Dynamics'`, inputs, outputs, `compute`, `formula` (symbols defined), `explain` (2-3 plain lines), assumptions, refs. Optional `demo: (si, canvas) => ...` redraws live on every input change; use `drawPlot` and `logspace` from `docs/plot.js` (log or linear axes, faint context curves, `vline`, one `point` for the operating point).
 3. Refs test: write independent reference values (numpy/scipy, not calcs.js) to JSON, copy to `tests/refs/<id>.json`, and add a test in `tests/calcs.test.mjs` checking every field to rel 1e-6.
 4. Spec test: in `tests/specs.test.mjs`, call the spec's `compute` with SI inputs (accel in m/s², not g) and check SI outputs against the same refs. `compute` gets m/s²; convert to g before calling a g-based function.
-5. Smoke: add the id to `TOOLS` in `tests/smoke.py` (and a canvas non-blank check like the transmissibility one).
+5. Smoke: add the id to `TOOLS` in `tests/smoke.py` (and a canvas non-blank check like the transmissibility one). If the spec has a driven `sim`, add a `run_driven_checks(p, '<id>', '<drive>')` line.
 6. Run `npm test` and the smoke test, then check a 390 px wide screenshot.
 
 ## ShakeLab interactive free decay
@@ -56,3 +56,29 @@ additional cases with SciPy matrix exponentials, including critical/overdamped l
 conditions. `smoke.py` includes all calculator checks plus `sim_smoke.py` interaction, disposal,
 visibility and fallback checks. These are functional checks, not a frame-rate benchmark.
 The app copies this scene with its `tools/sync_sim.sh`; edit the web source, then sync.
+
+## ShakeLab driven rigs
+
+The same `sdofRig` takes two more drives. A spec opts in with `sim: { kind: 'sdofRig', drive }`;
+`params` is `{fn, zeta, f}` from the current inputs. Both start from rest and play the closed form
+in `docs/calcs.js` (steady state plus the start-up transient, all damping branches), so resonance
+builds up over several cycles instead of appearing at full size.
+
+- `drive: 'forced'` (`forcedResponse`): the mass is pushed by F(t) = F0 sin ωt, drawn as an amber
+  arrow on the mass. Displacement is x/x_static. White lines mark ± x_static. The dial shows the
+  force and displacement phasors and the lag.
+- `drive: 'base'` (`baseResponse`): absolute motion in the ground frame. The amber frame is the
+  base, y = Y sin ωt; the teal block is the mass x; the spring stretch is z = x − y. Motion is
+  divided by Y. A white rail and a wire outline stay fixed to ground. Initial conditions: mass at
+  rest (x = 0, ẋ = 0) while the base passes y = 0 at speed ωY, so z(0) = 0 and ż(0) = −ωY.
+  The two bars compare base and mass amplitude (TR).
+
+Drawing scale is separate from physics: each rig picks one scene scale from the largest from-rest
+excursion (`peakTravel` in `docs/sim/support.js`) and labels the motion as normalized. Playback
+speed follows the forcing frequency with the same 0.4 to 1.5 Hz rule, labeled in the HUD.
+With Reduce Motion the rig waits for **Shake it**; otherwise it starts when it scrolls into view.
+At high r with light damping the start-up ringing at fn (about 1/r) outlasts and outweighs the
+steady 1/r² motion for roughly 1/(ζωn) seconds; that is the physics, not a display artifact.
+`window.__simState()` returns the read-only snapshot of the mounted scene, with `massY` and `baseY`
+read from the drawn meshes (scene units from rest, up positive). `tests/sim_driven_smoke.py` uses
+them, with the camera held still, to prove that the mass and the base move.

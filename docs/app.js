@@ -16,6 +16,7 @@ const h = (tag, attrs = {}, ...kids) => {
 
 let sys = localStorage.getItem('unitSystem') || 'us';
 const main = $('#main');
+const SIM_LABEL = { freeDecay: 'ShakeLab free decay', forced: 'ShakeLab force-driven response', base: 'ShakeLab base-driven response' };
 let disposeTool = () => {};
 const shakeBrand = () => h('div', { class: 'shakelab-brand' }, h('img', { src: 'assets/shakelab.png', alt: '' }), h('span', {}, 'ShakeLab', h('small', {}, 'Structural dynamics')));
 
@@ -115,7 +116,7 @@ function renderTool(tool, params) {
   const err = h('p', { class: 'error', role: 'alert' });
   const extra = h('div', {});
   const demoCanvas = tool.demo ? h('canvas', { class: 'demo', role: 'img', 'aria-label': `${tool.title} interactive plot` }) : null;
-  const simContainer = tool.sim ? h('section', { class: 'sim-panel', 'aria-label': 'ShakeLab free decay' }) : null;
+  const simContainer = tool.sim ? h('section', { class: 'sim-panel', 'aria-label': SIM_LABEL[tool.sim.drive] }) : null;
   let sim = null, ended = false, simParams = null;
   disposeTool = () => { ended = true; sim?.dispose(); window.removeEventListener('resize', redraw); };
   let lastSI = null;
@@ -154,7 +155,8 @@ function renderTool(tool, params) {
       h('tbody', {}, res._table.rows.map(r => h('tr', {}, r.map(c => h('td', {}, c)))))));
     last = { active, res };
     lastSI = bad || err.textContent ? null : si;
-    simParams = lastSI ? { fd: si.fd, zeta: res.zeta, fn: res.fn } : null;
+    // freeDecay rings at the measured fd with the computed ζ and fn; driven rigs take fn, ζ and forcing f as entered.
+    simParams = !lastSI || !tool.sim ? null : tool.sim.drive === 'freeDecay' ? { fd: si.fd, zeta: res.zeta, fn: res.fn } : { fn: si.fn, zeta: si.zeta, f: si.f };
     sim?.update(simParams);
     if (demoCanvas) { demoCanvas.hidden = !lastSI; redraw(); }
     history.replaceState(null, '', shareHash());
@@ -204,7 +206,7 @@ function renderTool(tool, params) {
     if (ended) return;
     const mounted = await mountSim(simContainer, { ...tool.sim, params: simParams });
     if (ended) mounted.dispose(); else { sim = mounted; sim.update(simParams); }
-  }).catch(() => { if (!ended) simContainer.textContent = '3D view unavailable. Use the 2D ring-down chart below.'; });
+  }).catch(() => { if (!ended) simContainer.textContent = '3D view unavailable. Use the 2D chart below.'; });
 }
 
 const backLink = () => h('a', { class: 'back', href: '#/' }, '← All tools');
