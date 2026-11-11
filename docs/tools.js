@@ -267,12 +267,13 @@ export const TOOLS = [
     },
     demo: (v, canvas) => {
       const rs = logspace(0.1, 10, 240), at = (zeta, r) => C.forcedDAF({ fn: 1, zeta, f: r, F0: 1, k: 1 });
-      const faint = [0.01, 0.05, 0.2, 0.5].map(z => ({ faint: true, pts: rs.map(r => [r, at(z, r).DAF]) }));  // they merge at both ends: no end labels
+      const grid = (z) => { const q = at(z, 1); return q.resonant ? [...rs, q.r_peak].sort((a, b) => a - b) : rs; };   // include the exact peak: narrow peaks fall between grid points
+      const faint = [0.01, 0.05, 0.2, 0.5].map(z => ({ faint: true, pts: grid(z).map(r => [r, at(z, r).DAF]) }));  // they merge at both ends: no end labels
       const r = v.f / v.fn, here = at(v.zeta, r);
       drawPlot(canvas, {
         band: [0, 0.6], xlog: true, ylog: true, xmin: 0.1, xmax: 10, ymin: 0.01, ymax: 100,
         xlabel: '', ylabel: 'DAF = X / x_static',
-        curves: [...faint, { pts: rs.map(q => [q, at(v.zeta, q).DAF]) }],
+        curves: [...faint, { pts: grid(v.zeta).map(q => [q, at(v.zeta, q).DAF]) }],
         vline: { x: 1, label: 'r = 1' }, point: { x: r, y: here.DAF },
       });
       drawPlot(canvas, {
@@ -286,7 +287,7 @@ export const TOOLS = [
     explain: ['Push slowly (r well below 1) and the mass just follows the force: DAF ≈ 1, lag ≈ 0. The spring carries the load.',
       'Push at the natural frequency and only the damper resists: DAF ≈ 1/(2ζ), and the motion trails the force by exactly 90°.',
       'Push fast (r well above 1) and the mass cannot keep up: DAF ≈ 1/r², motion nearly opposite the force (lag → 180°).',
-      'In the 3D rig the build-up from rest takes about 1/(πζ) cycles to reach ~63% at resonance: light damping means a big DAF but a slow build.'],
+      'In the 3D rig the build-up from rest takes about 1/(2πζ) cycles (envelope 1 − e^(−ζωn·t)) to reach ~63% at resonance: light damping means a big DAF but a slow build.'],
     assumptions: ['Single degree of freedom, linear spring, viscous damping, steady sinusoidal force of constant amplitude on the mass.',
       'DAF, X and φ are steady state. The 3D rig starts from rest, so it also shows the start-up transient at the damped natural frequency.',
       'Displacement resonance (peak of X) sits slightly below r = 1; φ is exactly 90° at r = 1 for any ζ.',

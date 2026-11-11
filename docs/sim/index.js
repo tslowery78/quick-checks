@@ -28,12 +28,12 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
   let rig, ctx, disposed = false, visible = true, hostActive = true, raf = 0, previous = null, age = 0, time = 0, x0 = 0, x = 0, dragging = false, peaks = 0, flash = 0, frames = 0, ready = false, valid = true;
   let p, scale, width = 1, height = 1, canvas2d;
   // Driven rigs: y base, force −1..1, steady-state gain and phase, visual unit, and whether the shaker runs.
-  let y = 0, force = 0, gain = 1, phase = 0, unit = TRAVEL, running = !reducedMotion;
+  let y = 0, force = 0, gain = 1, phase = 0, unit = TRAVEL, running = !reducedMotion, seen = 0;   // seen: largest |x| since restart (gauge scale)
   function release(fraction = .3) {
     if (disposed) return;
     dragging = false;
     if (!valid || !Number.isFinite(fraction)) return;
-    if (driven) { running = true; x = y = force = time = peaks = 0; onPeak(0); schedule(); return; }
+    if (driven) { running = true; x = y = force = time = peaks = seen = 0; onPeak(0); schedule(); return; }
     x0 = Math.max(-.4, Math.min(.4, fraction)) * 1.65; x = x0; time = 0; peaks = 0; flash = 0; dragging = false; onPeak(0); schedule();
   }
   function steady(next) {
@@ -119,7 +119,8 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
       }
       g.fillStyle = '#d9e9f1'; g.fillText(`x lags F ${phase.toFixed(0)}°`, cx, 93);
     } else {
-      const cy = 44, H = 30, top = Math.max(1, gain);
+      seen = Math.max(seen, Math.abs(x));   // start-up overshoot can exceed the steady gain: grow the scale, never clip
+      const cy = 44, H = 30, top = Math.max(1, gain, seen);
       g.strokeStyle = 'rgba(242,248,255,.6)'; g.lineWidth = 1; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(8, cy); g.lineTo(w - 8, cy); g.stroke(); g.setLineDash([]);
       for (const [cx, color, amp, value, name] of [[30, '#e58a1f', 1, y, 'base'], [74, '#2fe0d0', gain, x, 'mass']]) {
         const half = Math.max(1.5, H * amp / top), dot = cy - Math.max(-H - 6, Math.min(H + 6, H * value / top));
