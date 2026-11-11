@@ -1,20 +1,17 @@
 // Tiny dependency-free canvas plotter for tool demos. One focal curve, faint context curves,
 // optional vertical guide, one marked operating point. Axes are log10 or linear.
-// Stacked panels: give each call band: [from, to] (fractions of the canvas height, top = 0) and set
-// keep: true on every call after the first so the canvas is not cleared. yticks overrides the y ticks.
 const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
 
 export function drawPlot(canvas, o) {
-  // o: {xlog, ylog, xmin, xmax, ymin, ymax, xlabel, ylabel, curves:[{pts,faint,guide,label}], vline:{x,label}, point:{x,y}, band, keep, yticks}
+  // o: {xlog, ylog, xmin, xmax, ymin, ymax, xlabel, ylabel, curves:[{pts,faint,guide,label}], vline:{x,label}, point:{x,y}}
   const dpr = window.devicePixelRatio || 1;
-  const W = canvas.clientWidth, full = canvas.clientHeight;
-  if (!W || !full) return;
-  if (!o.keep) { canvas.width = Math.round(W * dpr); canvas.height = Math.round(full * dpr); }
-  const [from, to] = o.band ?? [0, 1], top = from * full, H = to * full;   // H = bottom edge of this panel
+  const W = canvas.clientWidth, H = canvas.clientHeight;
+  if (!W || !H) return;
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
   const g = canvas.getContext('2d');
   g.setTransform(dpr, 0, 0, dpr, 0, 0);
   const ink = css('--ink'), muted = css('--muted'), line = css('--line'), accent = css('--accent');
-  const L = 52, R = 12, T = top + 12, B = o.xlabel ? 44 : 24, pw = W - L - R, ph = H - T - B;
+  const L = 52, R = 12, T = 12, B = 44, pw = W - L - R, ph = H - T - B;
   const tx = (v) => o.xlog ? Math.log10(v) : v, ty = (v) => o.ylog ? Math.log10(v) : v;
   const X = (v) => L + (tx(v) - tx(o.xmin)) / (tx(o.xmax) - tx(o.xmin)) * pw;
   const Y = (v) => T + ph - (ty(Math.min(Math.max(v, o.ymin), o.ymax)) - ty(o.ymin)) / (ty(o.ymax) - ty(o.ymin)) * ph;
@@ -30,10 +27,10 @@ export function drawPlot(canvas, o) {
   g.textAlign = 'center'; g.textBaseline = 'top';
   for (const v of ticks(o.xmin, o.xmax, o.xlog)) { g.beginPath(); g.moveTo(X(v), T); g.lineTo(X(v), T + ph); g.stroke(); g.fillText(lab(v), X(v), T + ph + 4); }
   g.textAlign = 'right'; g.textBaseline = 'middle';
-  for (const v of o.yticks ?? ticks(o.ymin, o.ymax, o.ylog)) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(L + pw, Y(v)); g.stroke(); g.fillText(lab(v), L - 6, Y(v)); }
+  for (const v of ticks(o.ymin, o.ymax, o.ylog)) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(L + pw, Y(v)); g.stroke(); g.fillText(lab(v), L - 6, Y(v)); }
   g.strokeStyle = muted; g.strokeRect(L, T, pw, ph);
   g.fillStyle = ink; g.font = '14px system-ui, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'bottom';
-  if (o.xlabel) g.fillText(o.xlabel, L + pw / 2, H - 2);
+  g.fillText(o.xlabel, L + pw / 2, H - 2);
   g.save(); g.translate(13, T + ph / 2); g.rotate(-Math.PI / 2); g.textBaseline = 'top'; g.fillText(o.ylabel, 0, -4); g.restore();
   g.save(); g.beginPath(); g.rect(L, T, pw, ph); g.clip();
   if (o.vline) {
