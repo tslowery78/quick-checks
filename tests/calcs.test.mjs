@@ -225,6 +225,34 @@ test('forced drive limits: 1/(2ζ) at resonance, static follow at low r, 1/r² a
   }
 });
 
+test('forcedDAF vs scipy reference table', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/forced_daf.json', import.meta.url)));
+  const tol = (got, want, rel, what) => assert.ok(Math.abs(got - want) <= rel * Math.max(1, Math.abs(want)), `${what}: got ${got}, want ${want}`);
+  assert.equal(refs.length, 8);
+  for (const c of refs) {
+    const o = C.forcedDAF({ fn: c.fn_hz, zeta: c.zeta, f: c.f_hz, F0: c.F0_N, k: c.k_N_per_mm * 1e3 });
+    tol(o.r, c.r, 1e-6, 'r'); tol(o.x_static * 1e3, c.x_static_mm, 1e-6, 'x_static'); tol(o.DAF, c.DAF, 1e-6, 'DAF');
+    tol(o.X * 1e3, c.X_mm, 1e-6, 'X'); tol(o.phase_lag_deg, c.phase_lag_deg, 1e-6, 'phase');
+    near(o.peak_DAF, c.peak_DAF, 1e-4);                              // reference peak comes from a frequency grid
+    if (c.zeta >= Math.SQRT1_2) { assert.equal(o.resonant, false); within(o.r_peak, 0, 1e-2, 'r_peak (grid starts at 0.001)'); assert.equal(o.peak_DAF, 1); }
+    else { assert.equal(o.resonant, true); near(o.r_peak, c.r_peak, 1e-4); }
+  }
+});
+
+test('forcedDAF hand checks: r = 1 gives 1/(2ζ) at 90°, static and high-r limits, steady state of forcedResponse', () => {
+  const at = (zeta, r) => C.forcedDAF({ fn: 10, zeta, f: 10 * r, F0: 100, k: 1e4 });
+  for (const zeta of [0.01, 0.05, 0.3, 0.9]) { near(at(zeta, 1).DAF, 1 / (2 * zeta), 1e-12); near(at(zeta, 1).phase_lag_deg, 90, 1e-12); }
+  near(at(0.05, 1).x_static, 0.01, 1e-12); near(at(0.05, 1).X, 0.1, 1e-12);        // 100 N on 10 N/mm = 10 mm; ×10 = 100 mm
+  near(at(0.05, 1e-4).DAF, 1, 1e-7); within(at(0.05, 1e-4).phase_lag_deg, 0, 1e-3, 'static lag');
+  near(at(0.05, 100).DAF, 1e-4, 2e-4); assert.ok(at(0.05, 100).phase_lag_deg > 179.9 && at(0.05, 100).phase_lag_deg <= 180);
+  assert.equal(at(0.8, 1).r_peak, 0); assert.equal(at(0.8, 1).peak_DAF, 1);
+  for (const [zeta, r] of [[0.05, 0.5], [0.05, 1], [0.1, 2], [0.5, 1.4142], [1.5, 0.8]]) {   // DAF and φ are what the drive settles to
+    const fit = steadyFit(t => C.forcedResponse(t, 3, zeta, 3 * r).x, 3, zeta, 3 * r), o = C.forcedDAF({ fn: 3, zeta, f: 3 * r, F0: 1, k: 1 });
+    near(fit.amp, o.DAF, 1e-9); within(fit.lag_deg, o.phase_lag_deg, 1e-7, 'steady lag');
+  }
+  for (const bad of [{ fn: 0 }, { zeta: 0 }, { f: -1 }, { F0: -1 }, { k: 0 }, { k: NaN }]) assert.throws(() => C.forcedDAF({ fn: 10, zeta: 0.05, f: 10, F0: 1, k: 1, ...bad }));
+});
+
 test('baseResponse matches every row of the scipy lsim table (base y, absolute x, relative z; normalized by Y)', () => {
   let rows = 0;
   for (const c of motion) for (const row of c.rows) {

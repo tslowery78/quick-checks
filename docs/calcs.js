@@ -207,6 +207,22 @@ export function freeDecay(t, x0, v0, fn, zeta) {
   return { x: x0 * c + (v0 + a * x0) * s, v: v0 * c - (a * v0 + wn * wn * x0) * s };
 }
 
+// ---------- Structural dynamics: force-driven SDOF, dynamic amplification and phase ----------
+// m·ẍ + c·ẋ + k·x = F0·sin(ωt). SI in: fn, f in Hz, F0 in N, k in N/m. x_static = F0/k and X come back in m.
+// DAF = X/x_static = 1/√((1 − r²)² + (2ζr)²); the displacement lags the force by φ = atan2(2ζr, 1 − r²), 0..180°.
+// The displacement peak sits at r = √(1 − 2ζ²) and is 1/(2ζ√(1 − ζ²)); for ζ ≥ 1/√2 the curve only falls from
+// its static value, so the largest DAF is 1 at r = 0 (no resonant peak).
+export function forcedDAF({ fn, zeta, f, F0, k }) {
+  if (!(fn > 0) || !(f > 0) || !(zeta > 0) || !(F0 >= 0) || !(k > 0) || ![fn, zeta, f, F0, k].every(Number.isFinite))
+    throw new Error('Need fn > 0, f > 0, ζ > 0, F0 ≥ 0, k > 0.');
+  const r = f / fn, c = 2 * zeta * r, d = 1 - r * r;
+  const DAF = 1 / Math.hypot(d, c), x_static = F0 / k;
+  const resonant = zeta < Math.SQRT1_2;
+  return { r, x_static, DAF, X: DAF * x_static, phase_lag_deg: Math.atan2(c, d) * 180 / Math.PI,
+    resonant, r_peak: resonant ? Math.sqrt(1 - 2 * zeta * zeta) : 0,
+    peak_DAF: resonant ? 1 / (2 * zeta * Math.sqrt(1 - zeta * zeta)) : 1 };
+}
+
 // ---------- ShakeLab scene drives: SDOF from rest under a sine force or a sine base motion ----------
 // Pure closed forms played by docs/sim. Hz in, normalized motion out; t in seconds of physical time.
 function driveTerms(t, fn, zeta, f) {

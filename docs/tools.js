@@ -243,6 +243,57 @@ export const TOOLS = [
     refs: 'Rao, Mechanical Vibrations, base excitation; Harris & Piersol, Shock and Vibration Handbook, Ch. 3.',
   },
   {
+    id: 'forced_daf', sim: { kind: 'sdofRig', drive: 'forced' }, title: 'Force-driven SDOF: dynamic amplification and phase', group: 'Structural Dynamics',
+    blurb: 'A sinusoidal force on a spring-mass-damper: how much the motion exceeds the static deflection (DAF) and how far it lags the force.',
+    inputs: [
+      { key: 'fn', label: 'Natural frequency fn', dim: 'frequency', unit: 'Hz', def: [10, 10] },
+      { key: 'zeta', label: 'Damping ratio ζ', dim: 'none', def: [0.05, 0.05] },
+      { key: 'f', label: 'Forcing frequency f', dim: 'frequency', unit: 'Hz', def: [10, 10] },
+      { key: 'F0', label: 'Force amplitude F₀', dim: 'force', def: [25, 100] },
+      { key: 'k', label: 'Stiffness k', dim: 'stiffness', def: [50, 10] },
+    ],
+    outputs: [
+      { key: 'r', label: 'Frequency ratio r = f/fn', dim: 'none' },
+      { key: 'DAF', label: 'Dynamic amplification DAF', dim: 'none' },
+      { key: 'phase_lag_deg', label: 'Phase lag φ (deg, x behind F)', dim: 'none' },
+      { key: 'x_static', label: 'Static deflection F₀/k', dim: 'length' },
+      { key: 'X', label: 'Dynamic amplitude X', dim: 'length' },
+      { key: 'peak_DAF', label: 'Peak DAF', dim: 'none' },
+      { key: 'r_peak', label: 'r at peak DAF', dim: 'none' },
+    ],
+    compute: (v) => {
+      const t = C.forcedDAF({ fn: v.fn, zeta: v.zeta, f: v.f, F0: v.F0, k: v.k });
+      return { ...t, _table: t.resonant ? undefined : { head: ['Note'], rows: [['ζ ≥ 1/√2: no resonant peak. DAF only falls from 1 at r = 0.']] } };
+    },
+    demo: (v, canvas) => {
+      const rs = logspace(0.1, 10, 240), at = (zeta, r) => C.forcedDAF({ fn: 1, zeta, f: r, F0: 1, k: 1 });
+      const faint = [0.01, 0.05, 0.2, 0.5].map(z => ({ faint: true, pts: rs.map(r => [r, at(z, r).DAF]) }));  // they merge at both ends: no end labels
+      const r = v.f / v.fn, here = at(v.zeta, r);
+      drawPlot(canvas, {
+        band: [0, 0.6], xlog: true, ylog: true, xmin: 0.1, xmax: 10, ymin: 0.01, ymax: 100,
+        xlabel: '', ylabel: 'DAF = X / x_static',
+        curves: [...faint, { pts: rs.map(q => [q, at(v.zeta, q).DAF]) }],
+        vline: { x: 1, label: 'r = 1' }, point: { x: r, y: here.DAF },
+      });
+      drawPlot(canvas, {
+        band: [0.6, 1], keep: true, xlog: true, xmin: 0.1, xmax: 10, ymin: 0, ymax: 180, yticks: [0, 90, 180],
+        xlabel: 'Frequency ratio r = f/fn', ylabel: 'Lag φ (deg)',
+        curves: [{ guide: true, label: '90°', pts: [[0.1, 90], [10, 90]] }, { pts: rs.map(q => [q, at(v.zeta, q).phase_lag_deg]) }],
+        vline: { x: 1 }, point: { x: r, y: here.phase_lag_deg },
+      });
+    },
+    formula: 'r = f/fn;  x_static = F₀/k;  DAF = X/x_static = 1/√[(1 − r²)² + (2ζr)²];  X = DAF · x_static;  φ = atan2(2ζr, 1 − r²), 0 to 180°, displacement behind force;  peak DAF = 1/(2ζ√(1 − ζ²)) at r = √(1 − 2ζ²) when ζ < 1/√2, otherwise no resonant peak (largest DAF is 1 at r = 0).  Symbols: fn natural frequency (Hz), ζ damping ratio, f forcing frequency (Hz), F₀ force amplitude, k stiffness, X steady displacement amplitude.',
+    explain: ['Push slowly (r well below 1) and the mass just follows the force: DAF ≈ 1, lag ≈ 0. The spring carries the load.',
+      'Push at the natural frequency and only the damper resists: DAF ≈ 1/(2ζ), and the motion trails the force by exactly 90°.',
+      'Push fast (r well above 1) and the mass cannot keep up: DAF ≈ 1/r², motion nearly opposite the force (lag → 180°).',
+      'In the 3D rig the build-up from rest takes about 1/(πζ) cycles to reach ~63% at resonance: light damping means a big DAF but a slow build.'],
+    assumptions: ['Single degree of freedom, linear spring, viscous damping, steady sinusoidal force of constant amplitude on the mass.',
+      'DAF, X and φ are steady state. The 3D rig starts from rest, so it also shows the start-up transient at the damped natural frequency.',
+      'Displacement resonance (peak of X) sits slightly below r = 1; φ is exactly 90° at r = 1 for any ζ.',
+      'Plot: your ζ in bold over faint curves for ζ = 0.01, 0.05, 0.2 and 0.5; the lower panel is the lag φ.'],
+    refs: 'Rao, Mechanical Vibrations, harmonically excited vibration; Thomson & Dahleh, Theory of Vibration with Applications, Ch. 3.',
+  },
+  {
     id: 'logdec', sim: { kind: 'sdofRig', drive: 'freeDecay' }, title: 'Log decrement (free-decay damping)', group: 'Structural Dynamics',
     blurb: 'Damping ratio from a ring-down: two peaks N cycles apart give δ, ζ, fn and Q.',
     inputs: [

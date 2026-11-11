@@ -4,7 +4,7 @@ import re, sys
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:8765/'
-TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'logdec', 'halfpower', 'units']
+TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'forced_daf', 'logdec', 'halfpower', 'units']
 fails = []
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -56,6 +56,20 @@ with sync_playwright() as p:
     shown = [o.inner_text() for o in pg.locator('.out output').all()]
     if shown != ['0.05025', '9.95', '1.003', '0.05', '0.5038', '10', '10.01']: fails.append(('halfpower ref case shown', shown))
     pg.screenshot(path='screenshots/halfpower-us.png', full_page=True)
+    pg.goto(BASE + '#/forced_daf'); pg.reload(); pg.wait_for_timeout(200)
+    n0 = pg.evaluate(NB); s0 = pg.evaluate(sig)
+    if n0 < 1000: fails.append(('forced_daf canvas blank', n0))
+    pg.locator('.row:has-text("Forcing frequency") input').fill('14'); pg.wait_for_timeout(100)
+    if pg.evaluate(sig) == s0: fails.append(('forced_daf demo did not redraw',))
+    # refs/forced_daf.json case 1 by share link: r 0.5, DAF 1.3304, lag 3.814°, 10 mm static, 13.304 mm dynamic (4 significant figures, trailing zeros dropped), peak 10.01 at r 0.9975
+    pg.goto(BASE + '#/forced_daf?fn=10~Hz&zeta=0.05&f=5~Hz&F0=100~N&k=10~N%2Fmm'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.5', '1.33', '3.814', '10', '13.3', '10.01', '0.9975']: fails.append(('forced_daf ref case shown', shown))
+    # ζ ≥ 1/√2 (refs case 8): no resonant peak, peak DAF 1 at r = 0, and the note says so
+    pg.goto(BASE + '#/forced_daf?fn=20~Hz&zeta=0.8&f=20~Hz&F0=10~N&k=1~N%2Fmm'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['1', '0.625', '90', '10', '6.25', '1', '0'] or 'no resonant peak' not in pg.locator('main').inner_text(): fails.append(('forced_daf no-peak case shown', shown))
+    pg.screenshot(path='screenshots/forced_daf-us.png', full_page=True)
     # Known values
     pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','us')")
     pg.goto(BASE + '#/psd'); pg.reload(); pg.wait_for_timeout(150)
@@ -74,6 +88,7 @@ with sync_playwright() as p:
     from sim_smoke import run_sim_checks
     run_sim_checks(p)
     from sim_driven_smoke import run_driven_checks
+    run_driven_checks(p, 'forced_daf', 'forced')
     from sim_invalid_smoke import run_invalid_checks
     run_invalid_checks(p)
 print('console errors:', errs)
