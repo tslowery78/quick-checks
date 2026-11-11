@@ -53,14 +53,14 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
       : Number.isFinite(next.fd) && next.fd > 0 && Number.isFinite(next.zeta) && next.zeta >= 0 && next.zeta < 1);
     button.disabled = !valid;
     if (!valid) {
-      dragging = false; x0 = x = y = force = time = peaks = flash = 0;
+      dragging = false; x0 = x = y = force = time = peaks = flash = seen = 0;
       hud.textContent = 'Enter valid calculator inputs'; schedule(); return;
     }
     if (driven) {
       const changed = !p || p.fn !== next.fn || p.zeta !== next.zeta || p.f !== next.f;
       p = { ...next }; scale = timeScale(p.f);
       if (changed) steady(p);
-      if (changed || !wasValid) { x = y = force = time = peaks = 0; if (frames) onPeak(0); }  // new inputs restart from rest
+      if (changed || !wasValid) { x = y = force = time = peaks = seen = 0; if (frames) onPeak(0); }  // new inputs restart from rest
       schedule(); return;
     }
     const changed = p && (p.fd !== next.fd || p.zeta !== next.zeta);
