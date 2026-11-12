@@ -330,8 +330,16 @@ function pulseForced(kind, t, td, zeta) {
   // I = e^{st}·t·[φ((iΩ − s)t) − φ((−iΩ − s)t)]/(2i) with φ(z) = (e^z − 1)/z, which stays exact at resonance
   // (Ω = ωd, ζ → 0) where the textbook steady-state-plus-transient form divides zero by zero. ẋ = (ω²/ωd)·Im(s·I).
   const wd = w * Math.sqrt(1 - zeta * zeta), W = Math.PI / td, e = Math.exp(-a * t), er = e * Math.cos(wd * t), ei = e * Math.sin(wd * t);
-  const p = expm1Over(a * t, (W - wd) * t), q = expm1Over(a * t, -(W + wd) * t), dr = p[0] - q[0], di = p[1] - q[1];
-  const Ir = t * (er * di + ei * dr) / 2, Ii = -t * (er * dr - ei * di) / 2;
+  // G = e^{st}·[φ(z₊) − φ(z₋)], z± = (a + i(±Ω − ωd))·t. For a·t > 1 use e^{st}·φ(z) = (e^{±iΩt} − e^{st})/z
+  // (bounded; the product form overflows to ∞·0 = NaN once a·t > ~700).
+  const g = (sg) => {
+    const u = a * t, v = (sg * W - wd) * t;
+    if (u <= 1) { const f = expm1Over(u, v); return [er * f[0] - ei * f[1], er * f[1] + ei * f[0]]; }
+    const nr = Math.cos(sg * W * t) - er, ni = Math.sin(sg * W * t) - ei, m = u * u + v * v;
+    return [(nr * u + ni * v) / m, (ni * u - nr * v) / m];
+  };
+  const gp = g(1), gm = g(-1), Gr = gp[0] - gm[0], Gi = gp[1] - gm[1];
+  const Ir = t * Gi / 2, Ii = -t * Gr / 2;
   return [w * w / wd * Ii, w * w / wd * (wd * Ir - a * Ii)];
 }
 
@@ -379,6 +387,7 @@ export function pulsePeak(kind, tdOverT, zeta) {
   }
   const [x1, v1] = pulseForced(kind, td, td, zeta), s0 = Math.atan2(wd * v1, a * v1 + w * w * (x1 - eq)) / wd;
   times.push(td);
+  if (!Number.isFinite(s0)) throw new Error('Pulse response is not finite for these inputs.');
   for (let k = 0, found = 0; found < 2; k++) { const s = s0 + k * Math.PI / wd; if (s > 0) { times.push(td + s); found++; } }
   let best = null;
   for (const t of times.filter(t => t < td || t >= td).sort((p, q) => p - q)) {
