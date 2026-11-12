@@ -299,3 +299,100 @@ export function sweepState(t, fn, zeta, { duration = 12, from = .5, to = 1.5, fa
   return { f: fn * r, r, amp, phaseDeg: phi * 180 / Math.PI, x: w * amp * Math.sin(theta - phi), force: w * Math.sin(theta),
     inBand: amp >= Math.SQRT1_2, theta, w, u };
 }
+
+// ---------- Structural dynamics: dynamic load factor (DLF) of an SDOF under one force pulse ----------
+// m·ẍ + c·ẋ + k·x = F(t) from rest, underdamped (0 ≤ ζ < 1). Pulses of amplitude F0 and duration td:
+//   rect      F = F0            for t < td, 0 after
+//   halfsine  F = F0·sin(πt/td) for t < td, 0 after
+//   ramp      F = F0·t/td       for t < td, F0 after (finite-rise step, held)
+// DLF = max over t ≥ 0 of x(t)/x_static, x_static = F0/k. Everything below is the exact piecewise solution
+// (Duhamel integral done analytically), no time stepping. Internally time is in periods T = 1/fn and
+// displacement in x_static, so ωn = 2π.
+export const PULSES = ['rect', 'halfsine', 'ramp'];
+
+// (e^z − 1)/z for complex z = u + iv, accurate near z = 0 (returns [re, im]).
+function expm1Over(u, v) {
+  const m = u * u + v * v;
+  if (m < 1e-300) return [1, 0];
+  const eu = Math.expm1(u), h = Math.sin(v / 2), re = eu * Math.cos(v) - 2 * h * h, im = (eu + 1) * Math.sin(v);
+  return [(re * u + im * v) / m, (im * u - re * v) / m];
+}
+
+// [x, v] while the pulse is still rising or on (0 ≤ t ≤ td), from rest.
+function pulseForced(kind, t, td, zeta) {
+  const w = 2 * Math.PI, a = zeta * w;
+  if (kind === 'rect') { const h = freeDecay(t, 1, 0, 1, zeta); return [1 - h.x, -h.v]; }          // step response
+  if (kind === 'ramp') {                                   // particular (t − 2ζ/ω)/td plus the free response that cancels it at t = 0
+    const c = 2 * zeta / w, h = freeDecay(t, c / td, -1 / td, 1, zeta);
+    return [(t - c) / td + h.x, 1 / td + h.v];
+  }
+  // Half-sine: x = (ω²/ωd)·Im I, I = ∫₀ᵗ sin(Ωτ)·e^{s(t−τ)} dτ, s = −a + iωd, Ω = π/td.
+  // I = e^{st}·t·[φ((iΩ − s)t) − φ((−iΩ − s)t)]/(2i) with φ(z) = (e^z − 1)/z, which stays exact at resonance
+  // (Ω = ωd, ζ → 0) where the textbook steady-state-plus-transient form divides zero by zero. ẋ = (ω²/ωd)·Im(s·I).
+  const wd = w * Math.sqrt(1 - zeta * zeta), W = Math.PI / td, e = Math.exp(-a * t), er = e * Math.cos(wd * t), ei = e * Math.sin(wd * t);
+  const p = expm1Over(a * t, (W - wd) * t), q = expm1Over(a * t, -(W + wd) * t), dr = p[0] - q[0], di = p[1] - q[1];
+  const Ir = t * (er * di + ei * dr) / 2, Ii = -t * (er * dr - ei * di) / 2;
+  return [w * w / wd * Ii, w * w / wd * (wd * Ir - a * Ii)];
+}
+
+// [x, v] at any t ≥ 0: forced part up to td, then free vibration about the final load (0, or 1 for the held ramp).
+function pulseState(kind, t, td, zeta) {
+  if (t < td) return pulseForced(kind, t, td, zeta);
+  const [x1, v1] = pulseForced(kind, td, td, zeta), eq = kind === 'ramp' ? 1 : 0, h = freeDecay(t - td, x1 - eq, v1, 1, zeta);
+  return [eq + h.x, h.v];
+}
+
+function pulseArgs(kind, tdOverT, zeta) {
+  if (!PULSES.includes(kind)) throw new Error('Pulse type must be rect, halfsine or ramp.');
+  if (!(tdOverT > 0) || !(zeta >= 0) || !(zeta < 1) || !Number.isFinite(tdOverT)) throw new Error('Need td > 0, fn > 0 and 0 ≤ ζ < 1 (underdamped).');
+}
+
+// Scene drive and time plot. t and td in periods T; returns x/x_static, ẋ·T/x_static and F/F0.
+export function pulseResponse(t, kind, tdOverT, zeta) {
+  pulseArgs(kind, tdOverT, zeta);
+  if (!(t >= 0) || !Number.isFinite(t)) throw new Error('Need t ≥ 0.');
+  const [x, v] = pulseState(kind, t, tdOverT, zeta), on = t < tdOverT;
+  const F = kind === 'rect' ? (on ? 1 : 0) : kind === 'halfsine' ? (on ? Math.sin(Math.PI * t / tdOverT) : 0) : on ? t / tdOverT : 1;
+  return { x, v, F };
+}
+
+// Largest x/x_static over all t ≥ 0, when it happens (in periods) and whether that is during the pulse ("primary",
+// t < td) or after it ("residual"). Candidates are the stationary points:
+//   during  rect: first overshoot of the step response at π/ωd; ramp: none (ẋ ≥ 0 while the load rises);
+//           half-sine: every + → − sign change of ẋ, bracketed on a T/64 (or td/64) grid and bisected;
+//   after   free vibration about the final load: ωd·s = atan2(ωd·v1, a·v1 + ω²·x1) + kπ, the first two with s ≥ 0,
+//           and the pulse end itself. Later free peaks are never larger.
+// Ties (undamped peaks repeat) go to the earliest time.
+export function pulsePeak(kind, tdOverT, zeta) {
+  pulseArgs(kind, tdOverT, zeta);
+  const td = tdOverT, w = 2 * Math.PI, a = zeta * w, wd = w * Math.sqrt(1 - zeta * zeta), eq = kind === 'ramp' ? 1 : 0;
+  const times = [];
+  if (kind === 'rect' && Math.PI / wd < td) times.push(Math.PI / wd);
+  if (kind === 'halfsine') {
+    const n = Math.ceil(64 * Math.max(1, td)), vel = (t) => pulseForced(kind, t, td, zeta)[1];
+    let lo = td / n, vlo = vel(lo);
+    for (let i = 2; i <= n; i++) {
+      const hi = td * i / n, vhi = vel(hi);
+      if (vlo > 0 && vhi <= 0) { let p = lo, m = hi; for (let j = 0; j < 60; j++) { const mid = (p + m) / 2; if (vel(mid) > 0) p = mid; else m = mid; } times.push((p + m) / 2); }
+      lo = hi; vlo = vhi;
+    }
+  }
+  const [x1, v1] = pulseForced(kind, td, td, zeta), s0 = Math.atan2(wd * v1, a * v1 + w * w * (x1 - eq)) / wd;
+  times.push(td);
+  for (let k = 0, found = 0; found < 2; k++) { const s = s0 + k * Math.PI / wd; if (s > 0) { times.push(td + s); found++; } }
+  let best = null;
+  for (const t of times.filter(t => t < td || t >= td).sort((p, q) => p - q)) {
+    const x = pulseState(kind, Math.min(t, t < td ? td * (1 - 1e-16) : t), td, zeta)[0];
+    if (!best || x > best.DLF + 1e-12 * Math.max(1, Math.abs(best.DLF))) best = { DLF: x, t_peak_over_T: t };
+  }
+  return { ...best, phase: best.t_peak_over_T < td ? 'primary' : 'residual' };
+}
+
+// SI in: td in s, fn in Hz, F0 in N, k in N/m. x_static and x_max come back in m, T and t_peak in s, F_eq in N.
+// kind: 'rect' | 'halfsine' | 'ramp' (ramp: td is the rise time, then the load is held at F0).
+export function dlfPulse({ kind, td, fn, zeta = 0, F0, k }) {
+  if (!(td > 0) || !(fn > 0) || !(F0 >= 0) || !(k > 0) || ![td, fn, F0, k].every(Number.isFinite)) throw new Error('Need td > 0, fn > 0, F0 ≥ 0, k > 0.');
+  const T = 1 / fn, td_over_T = td * fn, peak = pulsePeak(kind, td_over_T, zeta), x_static = F0 / k;
+  return { T, td_over_T, DLF: peak.DLF, x_static, x_max: peak.DLF * x_static, t_peak: peak.t_peak_over_T * T,
+    phase: peak.phase, primary: peak.phase === 'primary', F_eq: peak.DLF * F0 };
+}
