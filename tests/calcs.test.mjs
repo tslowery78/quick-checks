@@ -306,3 +306,78 @@ test('base drive limits: x → y at low r, TR = 1 at r = √2 for any ζ, small 
     near(rel.amp, r * r / Math.hypot(1 - r * r, 2 * zeta * r), 1e-9);                          // |z|/Y = r²·D
   }
 });
+
+// ---------- Half-power sweep scene drive ----------
+test('sweepState: amplitude and lag are the steady-state forcedDAF values at the instantaneous frequency (refs, 1e-9)', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/forced_daf.json', import.meta.url)));
+  assert.equal(refs.length, 8);
+  for (const q of refs) {
+    // Put the ref frequency inside the sweep (the default 0.5..1.5·fn does not reach r = 0.3, 2 or 4).
+    const opts = { duration: 12, from: Math.min(.5, q.r / 2), to: Math.max(1.5, q.r * 1.5) };
+    const t = opts.duration * (q.r - opts.from) / (opts.to - opts.from), s = C.sweepState(t, q.fn_hz, q.zeta, opts);
+    const own = C.forcedDAF({ fn: q.fn_hz, zeta: q.zeta, f: s.f, F0: q.F0_N, k: q.k_N_per_mm * 1e3 });
+    near(s.f, q.f_hz, 1e-12); near(s.r, q.r, 1e-12);
+    // normalized by the peak DAF (independent ref peak is a numeric maximum: 1e-6 on that factor only)
+    assert.ok(Math.abs(s.amp * own.peak_DAF - q.DAF) <= 1e-9 * Math.max(1, q.DAF), `DAF ${s.amp * own.peak_DAF} vs ${q.DAF}`);
+    assert.ok(Math.abs(s.amp * q.peak_DAF - q.DAF) <= 1e-6 * Math.max(1, q.DAF), `ref-peak DAF ${s.amp * q.peak_DAF} vs ${q.DAF}`);
+    assert.ok(Math.abs(s.phaseDeg - q.phase_lag_deg) <= 1e-9, `lag ${s.phaseDeg} vs ${q.phase_lag_deg}`);
+    assert.equal(s.inBand, s.amp >= Math.SQRT1_2);
+  }
+  // Hand: ζ = 0.05 → peak 1/(2ζ√(1−ζ²)) = 10.0125 at r = √(1 − 2ζ²) = 0.99750; amp there is 1, lag = atan2(2ζr, 2ζ²) = 87.1°.
+  const pk = C.sweepState(12 * (Math.sqrt(1 - 2 * .05 ** 2) - .5), 10, .05);
+  near(pk.amp, 1, 1e-12); near(pk.f, 9.974968671630002, 1e-12); assert.ok(pk.inBand && Math.abs(pk.phaseDeg - 87.13) < .01);
+  // r = 1 exactly: DAF = 1/(2ζ) = 10 → amp = 10/10.0125 = 0.99875, lag 90°.
+  const res = C.sweepState(6, 10, .05); near(res.r, 1, 1e-15); near(res.amp, Math.sqrt(1 - .0025), 1e-12); near(res.phaseDeg, 90, 1e-12);
+  for (const bad of [[-1, 10, .05], [1, 0, .05], [1, 10, 0], [NaN, 10, .05], [1, 10, .05, { duration: 0 }], [1, 10, .05, { from: 1.5, to: .5 }], [1, 10, .05, { from: 0 }], [1, 10, .05, { fade: .6 }]])
+    assert.throws(() => C.sweepState(...bad), JSON.stringify(bad));
+});
+
+test('sweepState: the in-band edges are the half-power frequencies f1, f2 of the scipy FRF refs (1e-6 rel)', () => {
+  const refs = JSON.parse(readFileSync(new URL('./refs/halfpower.json', import.meta.url)));
+  assert.equal(refs.length, 7);
+  for (const q of refs) {
+    const r1 = q.f1_hz / q.fn_hz, r2 = q.f2_hz / q.fn_hz, rp = Math.sqrt(1 - 2 * q.zeta ** 2);
+    // ζ = 0.3 and 0.35 put f1 below 0.5·fn: start the sweep lower, exactly as the scene does.
+    const opts = { duration: 12, from: Math.min(.5, .8 * r1), to: 1.5 }, tOf = (r) => opts.duration * (r - opts.from) / (opts.to - opts.from);
+    const edge = (lo, hi) => {              // bisection on time for the instant inBand flips
+      const inLo = C.sweepState(lo, q.fn_hz, q.zeta, opts).inBand; assert.notEqual(inLo, C.sweepState(hi, q.fn_hz, q.zeta, opts).inBand);
+      for (let i = 0; i < 80; i++) { const mid = (lo + hi) / 2; if (C.sweepState(mid, q.fn_hz, q.zeta, opts).inBand === inLo) lo = mid; else hi = mid; }
+      return C.sweepState((lo + hi) / 2, q.fn_hz, q.zeta, opts);
+    };
+    const a = edge(0, tOf(rp)), b = edge(tOf(rp), opts.duration * (1 - 1e-12));
+    near(a.r, r1, 1e-6); near(b.r, r2, 1e-6); near(a.f, q.f1_hz, 1e-6); near(b.f, q.f2_hz, 1e-6);
+    near(a.amp, Math.SQRT1_2, 1e-9); near(b.amp, Math.SQRT1_2, 1e-9);
+    // The peak of the normalized amplitude is 1 at the measured fr, and peak × ref peak gain is the FRF value there.
+    const top = C.sweepState(tOf(rp), q.fn_hz, q.zeta, opts);
+    near(top.amp, 1, 1e-12); near(top.f, q.fr_hz, 1e-6); assert.ok(top.inBand);
+    // Fed from the calculator, as the scene is: fn and ζ from halfPower(fr, f1, f2) give the same edges.
+    const hp = C.halfPower({ fr: q.fr_hz, f1: q.f1_hz, f2: q.f2_hz });
+    near(C.sweepState(tOf(r1), hp.fn, hp.zeta, opts).amp, Math.SQRT1_2, 1e-6); near(C.sweepState(tOf(r2), hp.fn, hp.zeta, opts).amp, Math.SQRT1_2, 1e-6);
+  }
+});
+
+test('sweepState: forcing phase θ is the integral of f, and the loop wrap is a rest-to-rest restart (no jump)', () => {
+  const fn = 10, zeta = .05, D = 1.2, opts = { duration: D }, at = (t) => C.sweepState(t, fn, zeta, opts);
+  assert.deepEqual([at(0).theta, Math.abs(at(0).x), at(0).force, at(0).w, at(0).f], [0, 0, 0, 0, 5]);   // abs: x is −0 (0·sin(−φ))
+  // dθ/dt = 2π·f(t) (central difference) and θ grows monotonically inside a loop.
+  for (const t of [.05, .3, .6, .9, 1.15]) { const h = 1e-6; near((at(t + h).theta - at(t - h).theta) / (2 * h), 2 * Math.PI * at(t).f, 1e-8); }
+  // Hand: θ(D) = 2π·fn·D·(0.5 + 1.5)/2 = 2π·fn·D → 12 cycles for fn·D = 12 (mean frequency = fn).
+  near(at(D * (1 - 1e-13)).theta, 2 * Math.PI * 12, 1e-9);
+  // Loop wrap: θ restarts at 0 but force and motion are faded to exactly 0 on both sides; values repeat with period D.
+  for (const eps of [1e-3, 1e-6, 1e-9]) {
+    const before = at(D - eps), after = at(D + eps);
+    assert.ok(Math.abs(before.x) <= 2 * (eps / (D * .06)) ** 2 && Math.abs(after.x) <= 2 * (eps / (D * .06)) ** 2, `x near wrap ${before.x}, ${after.x}`);
+    assert.ok(Math.abs(before.force) <= 3 * (eps / (D * .06)) ** 2 && Math.abs(after.force) <= 3 * (eps / (D * .06)) ** 2);
+  }
+  assert.deepEqual([Math.abs(at(D).x), at(D).force, at(D).theta, at(D).u], [0, 0, 0, 0]);
+  near(at(D + .4).x, at(.4).x, 1e-9); near(at(3 * D + .7).theta, at(.7).theta, 1e-9);
+  // No jump anywhere, wrap included: adjacent samples never differ by more than (max slope)·dt.
+  // |ẋ| ≤ 2π·f_max·amp + fade slope + amplitude slope; 2π·15 Hz·1 = 94/s, the others add < 40/s here.
+  const dt = 1e-4; let worst = 0, wrapStep = 0;
+  for (let i = 0; i < 2.5 * D / dt; i++) { const step = Math.abs(at((i + 1) * dt).x - at(i * dt).x); worst = Math.max(worst, step); if (Math.abs((i + .5) * dt - D) < 2 * dt) wrapStep = Math.max(wrapStep, step); }
+  assert.ok(worst < 140 * dt, `largest step ${worst}`); assert.ok(wrapStep < 1e-4 * worst, `step across the wrap ${wrapStep}`);
+  // Middle of the loop is unfaded: x = amp·sin(θ − φ) exactly, |x| ≤ amp ≤ 1.
+  const mid = at(.5 * D); assert.equal(mid.w, 1); near(mid.x, mid.amp * Math.sin(mid.theta - mid.phaseDeg * Math.PI / 180), 1e-9);
+  // fade = 0 switches the envelope off (documented option).
+  assert.equal(C.sweepState(.01, fn, zeta, { duration: D, fade: 0 }).w, 1);
+});

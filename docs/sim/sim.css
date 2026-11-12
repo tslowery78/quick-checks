@@ -10,6 +10,8 @@ canvas.sim[hidden] { display:none; }
 .sim-heading small, .sim-mode { white-space:nowrap; }
 canvas.sim-gauge { position:absolute; top:10px; left:10px; width:104px; height:104px; pointer-events:none; }
 canvas.sim-gauge[hidden] { display:none; }
+canvas.sim-trace { display:block; flex:none; width:100%; height:96px; border-top:1px solid #1c3140; }
+canvas.sim-trace[hidden] { display:none; }
 .sim-hint { font-size:11px; color:#9eb8c5; text-align:center; margin:4px 12px 12px; }
 #sim-release { display:block; width:calc(100% - 32px); margin:0 16px 16px; border:1px solid #5ad5cb; border-radius:10px; background:#1dd0bd; color:#062d31; font:650 15px/1.2 system-ui,sans-serif; padding:13px; cursor:pointer; }
 #sim-release:disabled { opacity:.5; }

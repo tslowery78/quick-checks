@@ -17,6 +17,15 @@ export function webglOK() {
 // so the visible ringing stays between 0.4 and 1.5 Hz. s > 1 is slow motion, s < 1 is sped up.
 export const timeScale = (f) => f / Math.min(Math.max(f, 0.4), 1.5);
 
+// Calculator → scene parameters, per drive. si: the SI inputs as entered, res: the calculator result.
+//   freeDecay rings at the measured fd with the computed ζ and fn; forced and base take fn, ζ and forcing f as entered;
+//   sweep takes the computed fn and exact ζ (so the drawn band edges land on the entered f1, f2) plus fr, f1, f2 for the markers.
+export function simParamsFor(drive, si, res) {
+  if (drive === 'freeDecay') return { fd: si.fd, zeta: res.zeta, fn: res.fn };
+  if (drive === 'sweep') return { fn: res.fn, zeta: res.zeta, fr: si.fr, f1: si.f1, f2: si.f2 };
+  return { fn: si.fn, zeta: si.zeta, f: si.f };
+}
+
 const sig2 = (x) => String(Number(x.toPrecision(2)));
 export const timeLabel = (s) => s > 1.005 ? `slow-mo ×${sig2(s)}` : s < 0.995 ? `fast ×${sig2(1 / s)}` : 'real time ×1';
 

@@ -352,6 +352,7 @@ export const TOOLS = [
       { key: 'peak_gain', label: 'Peak gain k|X/F| = 1/(2ζ√(1−ζ²))', dim: 'none' },
     ],
     compute: (v) => C.halfPower({ fr: v.fr, f1: v.f1, f2: v.f2 }),
+    sim: { kind: 'sdofRig', drive: 'sweep' },
     demo: (v, canvas) => {
       const t = C.halfPower({ fr: v.fr, f1: v.f1, f2: v.f2 }), hp = t.peak_gain / Math.SQRT2;
       const lo = Math.max(0, v.fr - 2.5 * t.df), hi = v.fr + 2.5 * t.df, ymax = t.peak_gain * 1.15;
@@ -372,7 +373,8 @@ export const TOOLS = [
       'Need a fine frequency step: if only 2-3 points span Δf, the bandwidth (and ζ) is set by the resolution, not the structure.'],
     assumptions: ['One well-separated mode, linear, viscous damping; read f₁, f₂ on the FRF magnitude (not dB of power) at peak/√2.',
       'Exact ζ and fn assume a displacement (receptance) FRF; for a mobility (velocity) FRF Δf/(2fn) is already exact.',
-      'The plot is the SDOF receptance rebuilt from the exact ζ and fn, centred on fr.'],
+      'The plot is the SDOF receptance rebuilt from the exact ζ and fn, centred on fr.',
+      'The scene is a quasi-steady sweep: each frequency is shown at its steady-state amplitude and phase, divided by the peak. A real sweep this fast would lag and smear the peak.'],
     refs: 'Ewins, Modal Testing, half-power point method; Rao, Mechanical Vibrations, quality factor and bandwidth.',
   },
 ];

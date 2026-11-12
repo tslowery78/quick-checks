@@ -4,7 +4,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { TOOLS } from '../docs/tools.js';
-import { G0 } from '../docs/calcs.js';
+import { G0, sweepState } from '../docs/calcs.js';
+import { simParamsFor } from '../docs/sim/support.js';
 
 const close = (a, b, rel = 1e-6) => assert.ok(Math.abs(a - b) <= rel * Math.max(1, Math.abs(b)), `${a} vs ${b}`);
 
@@ -36,6 +37,21 @@ test('halfpower spec: SI in (Hz), SI out, matches scipy refs', () => {
   for (const c of refs) {
     const o = spec.compute({ fr: c.fr_hz, f1: c.f1_hz, f2: c.f2_hz });
     close(o.zeta, c.zeta); close(o.fn, c.fn_hz); close(o.Q, c.Q); close(o.zeta_hp, c.zeta_hp); close(o.df, c.df_hz);
+  }
+});
+
+test('halfpower spec: sweep scene hook; the scene band built from the spec result lands on the entered f1, f2', () => {
+  const spec = TOOLS.find(t => t.id === 'halfpower');
+  assert.deepEqual(spec.sim, { kind: 'sdofRig', drive: 'sweep' });
+  const refs = JSON.parse(readFileSync(new URL('./refs/halfpower.json', import.meta.url)));
+  for (const c of refs) {
+    const si = { fr: c.fr_hz, f1: c.f1_hz, f2: c.f2_hz }, p = simParamsFor('sweep', si, spec.compute(si));
+    assert.deepEqual(Object.keys(p), ['fn', 'zeta', 'fr', 'f1', 'f2']);
+    close(p.fn, c.fn_hz); close(p.zeta, c.zeta); assert.equal(p.f1, c.f1_hz); assert.equal(p.f2, c.f2_hz); assert.equal(p.fr, c.fr_hz);
+    // Steady-state amplitude/peak at the entered frequencies: 1/√2 at f1 and f2, 1 at fr (sweep time t that puts f there).
+    const span = { from: Math.min(.5, .8 * p.f1 / p.fn), to: 1.5 }, at = (f) => sweepState(12 * (f / p.fn - span.from) / (span.to - span.from), p.fn, p.zeta, span);
+    close(at(p.f1).amp, Math.SQRT1_2); close(at(p.f2).amp, Math.SQRT1_2); close(at(p.fr).amp, 1);
+    close(at(p.f1).f, p.f1); assert.ok(at((p.f1 + p.f2) / 2).inBand && !at(p.f1 * .98).inBand && !at(p.f2 * 1.02).inBand);
   }
 });
 

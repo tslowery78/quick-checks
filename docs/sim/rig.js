@@ -4,12 +4,13 @@ import { RoomEnvironment } from '../vendor/three/examples/jsm/environments/RoomE
 import { RoundedBoxGeometry } from '../vendor/three/examples/jsm/geometries/RoundedBoxGeometry.js';
 
 // All dimensions below are schematic scene units; equilibrium sag is omitted.
-// drive 'freeDecay': drag and release the mass. 'forced': an amber arrow on the mass shows F(t).
+// drive 'freeDecay': drag and release the mass. 'forced' and 'sweep': an amber arrow on the mass shows F(t);
+// 'sweep' also lights the mass (emissive glow 0..1) while the forcing frequency is inside the half-power band.
 // 'base': the amber frame (plate, posts, beam, spring anchor) is the shaking base; it rides a fixed
 // pedestal, and a fixed white rail plus a ghost outline of the mass mark the ground frame.
 export const FREE_LENGTH = 1.65;
 export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFailure, reducedMotion }) {
-  const based = drive === 'base', forced = drive === 'forced';
+  const based = drive === 'base', forced = drive === 'forced' || drive === 'sweep';
   const LIFT = based ? .62 : 0, ORBIT = based ? 8.7 : 7.94, EYE = based ? 3.45 : 3.1, ARROW = .8;
   const renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: false });
   let environment, pmrem, room, controls;
@@ -82,7 +83,7 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
     const material = (opts) => { const m = new T.MeshStandardMaterial(opts); materials.add(m); return m; };
     const chrome = material({ color: '#e4eef3', metalness: 1, roughness: .2 });
     const dark = material({ color: '#233444', metalness: .8, roughness: .34 });
-    const teal = material({ color: '#009d93', metalness: .4, roughness: .25 });
+    const teal = material({ color: '#009d93', metalness: .4, roughness: .25, emissive: '#2fe0d0', emissiveIntensity: 0 });
     const rubber = material({ color: '#0a121a', metalness: .15, roughness: .65 });
     const amber = material({ color: '#e58a1f', metalness: .55, roughness: .32 });
     const mesh = (geo, mat, x, y, z, parent = scene) => {
@@ -117,7 +118,7 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
       for (const x of [-1.56, 1.56]) marker(x, (LIFT + .19 - .11) / 2, 1.0, .03, LIFT + .19 + .11, .03, white);
     }
     if (forced) {
-      const white = basic('#f2f8ff', .9);             // fixed lines at rest ± x_static (moved by setReference)
+      const white = basic('#f2f8ff', .9);             // fixed lines at rest ± the reference amplitude (moved by setReference)
       band = [1, -1].map(side => { const m = marker(0, 1.25, .5, 1.5, .016, .016, white); m.userData.side = side; return m; });
       const hot = material({ color: '#ffb347', emissive: '#c05a00', emissiveIntensity: .7, metalness: .2, roughness: .4 });
       arrow = new T.Group(); arrow.position.set(0, 1.25, .64); scene.add(arrow);
@@ -173,9 +174,10 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
     let verified = false, pixelRange = 0;
     return {
       // x, base: displacement of the mass and of the frame in scene units, positive down, both in the
-      // ground frame. force: −1..1, positive up (forced rig only). Spring and dashpot span x − base.
-      draw(x, age, flash, base = 0, force = 0) {
-        displacement = x; mass.position.y = 1.25 + LIFT - x; frame.position.y = LIFT - base; coil(FREE_LENGTH + x - base);
+      // ground frame. force: −1..1, positive up (rigs with an arrow). glow: 0..1 emissive light on the mass.
+      // Spring and dashpot span x − base.
+      draw(x, age, flash, base = 0, force = 0, glow = 0) {
+        displacement = x; teal.emissiveIntensity = .9 * glow; mass.position.y = 1.25 + LIFT - x; frame.position.y = LIFT - base; coil(FREE_LENGTH + x - base);
         const lower = 1.25 - (x - base) + .28, upper = 2.6;   // frame-local
         rod.position.y = (lower + upper) / 2; rod.scale.y = upper - lower;
         if (arrow) {
@@ -201,14 +203,14 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
           verified = true;
         }
       },
-      // Scene units per unit of normalized displacement; places the ± x_static lines of the forced rig.
+      // Scene units from rest to the white reference lines (forced: x_static; sweep: peak/√2).
       setReference(unit) { for (const m of band) m.position.y = 1.25 + m.userData.side * unit; },
       resize(w, h) { renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); },
       snapshot() {
         const p = mass.position.clone().project(camera), r = canvas.getBoundingClientRect();
         // massY, baseY: mesh displacement from rest in scene units, positive up, ground frame.
         return { camera: camera.position.toArray(), pulling, pixelRange, vertices: pos.length / 3,
-          massY: mass.position.y - 1.25 - LIFT, baseY: frame.position.y - LIFT, arrow: arrow ? (arrow.rotation.z ? -1 : 1) * (shaft.scale.y + .26 * head.scale.y) : 0,
+          massY: mass.position.y - 1.25 - LIFT, baseY: frame.position.y - LIFT, glow: teal.emissiveIntensity, arrow: arrow ? (arrow.rotation.z ? -1 : 1) * (shaft.scale.y + .26 * head.scale.y) : 0,
           massScreen: { x: r.left + (p.x + 1) * r.width / 2, y: r.top + (1 - p.y) * r.height / 2 } };
       },
       dispose: clean

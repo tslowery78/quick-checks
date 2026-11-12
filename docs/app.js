@@ -2,6 +2,7 @@
 // Routing is hash-based (#/beam?m=ssUDL&L=120~in...) so every calculation is a shareable link.
 import { UNITS, toSI, fromSI, convert } from './calcs.js';
 import { TOOLS } from './tools.js';
+import { simParamsFor } from './sim/support.js';
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const h = (tag, attrs = {}, ...kids) => {
@@ -16,7 +17,8 @@ const h = (tag, attrs = {}, ...kids) => {
 
 let sys = localStorage.getItem('unitSystem') || 'us';
 const main = $('#main');
-const SIM_LABEL = { freeDecay: 'ShakeLab free decay', forced: 'ShakeLab force-driven response', base: 'ShakeLab base-driven response' };
+const SIM_LABEL = { freeDecay: 'ShakeLab free decay', forced: 'ShakeLab force-driven response', base: 'ShakeLab base-driven response',
+  sweep: 'ShakeLab sweep through resonance' };
 let disposeTool = () => {};
 const shakeBrand = () => h('div', { class: 'shakelab-brand' }, h('img', { src: 'assets/shakelab.png', alt: '' }), h('span', {}, 'ShakeLab', h('small', {}, 'Structural dynamics')));
 
@@ -155,8 +157,7 @@ function renderTool(tool, params) {
       h('tbody', {}, res._table.rows.map(r => h('tr', {}, r.map(c => h('td', {}, c)))))));
     last = { active, res };
     lastSI = bad || err.textContent ? null : si;
-    // freeDecay rings at the measured fd with the computed ζ and fn; driven rigs take fn, ζ and forcing f as entered.
-    simParams = !lastSI || !tool.sim ? null : tool.sim.drive === 'freeDecay' ? { fd: si.fd, zeta: res.zeta, fn: res.fn } : { fn: si.fn, zeta: si.zeta, f: si.f };
+    simParams = !lastSI || !tool.sim ? null : simParamsFor(tool.sim.drive, si, res);
     sim?.update(simParams);
     if (demoCanvas) { demoCanvas.hidden = !lastSI; redraw(); }
     history.replaceState(null, '', shareHash());

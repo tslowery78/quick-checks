@@ -275,3 +275,27 @@ export function halfPower({ fr, f1, f2 }) {
 
 // SDOF receptance gain k|X/F| at frequency f (Hz).
 export const receptanceGain = (fn, zeta, f) => { const r = f / fn; return 1 / Math.sqrt((1 - r * r) ** 2 + (2 * zeta * r) ** 2); };
+
+// ---------- ShakeLab scene drive: quasi-steady sine sweep through resonance (half-power band) ----------
+// The forcing frequency climbs linearly from `from`·fn to `to`·fn over `duration` seconds, then the loop restarts.
+// QUASI-STEADY: at every instant the response shown is the steady-state one for the current frequency
+// (amplitude DAF(r), lag φ(r)). A real sweep this fast would lag behind and ring; this drive does not model that.
+//   τ = t mod duration,  f = fn·(from + (to − from)·τ/duration),  r = f/fn
+//   θ = 2π∫f dτ = 2π·fn·τ·(from + (to − from)·τ/(2·duration))        integrated forcing phase (rad)
+//   amp = DAF(r)/peak DAF  (1 at the displacement peak),  φ = atan2(2ζr, 1 − r²),  inBand = amp ≥ 1/√2
+//   force = w·sin θ,  x = w·amp·sin(θ − φ)                            x in units of the peak amplitude
+// Loop wrap: θ restarts from 0, so force and x are multiplied by w(τ), a smoothstep that rises 0 → 1 over the
+// first `fade` fraction of the loop and falls back to 0 over the last. Both are exactly 0 on each side of the
+// wrap, so the rig comes to rest and restarts from rest with no phase jump. amp, phaseDeg and inBand are not faded.
+export function sweepState(t, fn, zeta, { duration = 12, from = .5, to = 1.5, fade = .06 } = {}) {
+  if (!(fn > 0) || !(zeta > 0) || !(duration > 0) || !(from > 0) || !(to > from) || !(fade >= 0) || !(fade <= .5) || !(t >= 0)
+    || ![t, fn, zeta, duration, to].every(Number.isFinite)) throw new Error('Need fn > 0, ζ > 0, t ≥ 0, duration > 0 and 0 < from < to.');
+  const tau = t % duration, u = tau / duration, r = from + (to - from) * u;
+  const theta = 2 * Math.PI * fn * tau * (from + (to - from) * u / 2);
+  const c = 2 * zeta * r, d = 1 - r * r, phi = Math.atan2(c, d);
+  const peak = zeta < Math.SQRT1_2 ? 1 / (2 * zeta * Math.sqrt(1 - zeta * zeta)) : 1;   // same peak as forcedDAF
+  const amp = 1 / Math.hypot(d, c) / peak;
+  const e = fade > 0 ? Math.min(u, 1 - u) / fade : 1, w = e < 1 ? e * e * (3 - 2 * e) : 1;
+  return { f: fn * r, r, amp, phaseDeg: phi * 180 / Math.PI, x: w * amp * Math.sin(theta - phi), force: w * Math.sin(theta),
+    inBand: amp >= Math.SQRT1_2, theta, w, u };
+}

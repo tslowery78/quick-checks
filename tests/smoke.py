@@ -92,6 +92,8 @@ with sync_playwright() as p:
     from sim_invalid_smoke import run_invalid_checks
     run_invalid_checks(p)
     run_driven_checks(p, 'transmissibility', 'base')
+    from sim_scene_smoke import run_scene_checks
+    run_scene_checks(p, 'halfpower', 'sweep')
 print('console errors:', errs)
 print('failures:', fails)
 sys.exit(1 if errs or fails else 0)

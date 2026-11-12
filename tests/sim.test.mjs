@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { timeScale, timeLabel, peakTravel } from '../docs/sim/support.js';
+import { timeScale, timeLabel, peakTravel, simParamsFor } from '../docs/sim/support.js';
 import { freeDecay, forcedResponse, baseResponse } from '../docs/calcs.js';
 test('playback frequency stays within 0.4–1.5 Hz; labels distinguish speedup', () => {
   for (const f of [.01,.2,.4,1,1.5,10,1000]) assert.equal(f / timeScale(f), Math.min(1.5, Math.max(.4, f)));
@@ -28,4 +28,11 @@ test('peakTravel bounds the from-rest motion the driven rigs must fit on screen'
   let brute = 0; for (let i = 0; i <= 40000; i++) brute = Math.max(brute, Math.abs(baseResponse(i * 2e-4, 10, .05, 20).z));
   assert.ok(z >= brute * Math.cos(Math.PI / 16) && z <= brute + 1e-12, `stretch ${z} vs brute ${brute}`);
   for (const zeta of [.001, .3, 1, 4]) for (const f of [.02, 1, 3, 500]) assert.ok(Number.isFinite(forced(1, zeta, f, 0)) && Number.isFinite(stretch(1, zeta, f, 0)));
+});
+test('simParamsFor maps calculator inputs and results to each drive', () => {
+  const si = { fd: 9.9875, fn: 10, zeta: .05, f: 20, fr: 9.975, f1: 9.461, f2: 10.464 }, res = { zeta: .0502, fn: 10.001 };
+  assert.deepEqual(simParamsFor('freeDecay', si, res), { fd: 9.9875, zeta: .0502, fn: 10.001 });   // measured fd, computed ζ and fn
+  assert.deepEqual(simParamsFor('forced', si, res), { fn: 10, zeta: .05, f: 20 });                 // as entered
+  assert.deepEqual(simParamsFor('base', si, res), { fn: 10, zeta: .05, f: 20 });
+  assert.deepEqual(simParamsFor('sweep', si, res), { fn: 10.001, zeta: .0502, fr: 9.975, f1: 9.461, f2: 10.464 });   // computed fn, ζ; entered markers
 });

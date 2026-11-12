@@ -17,7 +17,7 @@ One concept per day (group "Structural Dynamics"; shared with the iOS app, see t
 2. Spec: add an entry to `docs/tools.js` with `group: 'Structural Dynamics'`, inputs, outputs, `compute`, `formula` (symbols defined), `explain` (2-3 plain lines), assumptions, refs. Optional `demo: (si, canvas) => ...` redraws live on every input change; use `drawPlot` and `logspace` from `docs/plot.js` (log or linear axes, faint context curves, `vline`, one `point` for the operating point).
 3. Refs test: write independent reference values (numpy/scipy, not calcs.js) to JSON, copy to `tests/refs/<id>.json`, and add a test in `tests/calcs.test.mjs` checking every field to rel 1e-6.
 4. Spec test: in `tests/specs.test.mjs`, call the spec's `compute` with SI inputs (accel in m/s², not g) and check SI outputs against the same refs. `compute` gets m/s²; convert to g before calling a g-based function.
-5. Smoke: add the id to `TOOLS` in `tests/smoke.py` (and a canvas non-blank check like the transmissibility one). If the spec has a driven `sim`, add a `run_driven_checks(p, '<id>', '<drive>')` line.
+5. Smoke: add the id to `TOOLS` in `tests/smoke.py` (and a canvas non-blank check like the transmissibility one). If the spec has a driven `sim`, add a `run_driven_checks(p, '<id>', '<drive>')` line (`run_scene_checks` for a scene with a trace strip).
 6. Run `npm test` and the smoke test, then check a 390 px wide screenshot.
 
 ## ShakeLab interactive free decay
@@ -82,3 +82,24 @@ steady 1/r² motion for roughly 1/(ζωn) seconds; that is the physics, not a di
 `window.__simState()` returns the read-only snapshot of the mounted scene, with `massY` and `baseY`
 read from the drawn meshes (scene units from rest, up positive). `tests/sim_driven_smoke.py` uses
 them, with the camera held still, to prove that the mass and the base move.
+
+## ShakeLab sweep through resonance (half-power bandwidth)
+
+`drive: 'sweep'` (`sweepState` in `docs/calcs.js`) is the half-power scene. `params` is
+`{fn, zeta, fr, f1, f2}`: fn and the exact ζ from the calculator result, fr, f1, f2 as entered
+(`simParamsFor` in `docs/sim/support.js` does the calculator → scene mapping for every drive).
+
+- The force arrow sweeps linearly from 0.5·fn to 1.5·fn in 12 s of playback (lower start if f1 is
+  below 0.5·fn). It is a QUASI-STEADY sweep: at each instant the mass is drawn with the steady-state
+  amplitude and phase lag of the current frequency, x = (DAF/peak DAF)·sin(θ − φ), θ = 2π∫f dt.
+  The HUD says so. A real sweep this fast would lag and smear the peak; the scene does not model that.
+- Amplitude is divided by the peak, so 1 = peak. White lines mark ± peak/√2. The block glows and the
+  HUD shows IN BAND exactly while amplitude ≥ peak/√2, which is f1..f2.
+- The strip under the rig is the live amplitude-vs-frequency trace: faint = whole curve, bright =
+  swept so far, verticals at f1, fr, f2, band shaded.
+- Playback: the top of the sweep (1.5·fn) plays at 1.5 Hz, so slow-mo × = fn for fn ≥ 0.27 Hz.
+- Each pass starts and ends at rest (6% smoothstep fade at both ends, so there is no jump at the
+  wrap). It loops; with Reduce Motion it runs one pass per **Sweep it** and stops.
+
+`tests/sim_scene_smoke.py` checks it in the browser (mass mesh position with a still camera, glow
+and band edges, closed form at the scene clock, restart, invalid inputs, disposal, 2D fallback).
