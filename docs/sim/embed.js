@@ -1,10 +1,10 @@
 import { mountSim } from './index.js';
-// Host page for the iOS app. ?drive=freeDecay (default) | forced | base | sweep picks the rig; the native side then
+// Host page for the iOS app. ?drive=freeDecay (default) | forced | base | sweep | pulse picks the rig; the native side then
 // feeds calculator inputs through simSetParams ({ fd, zeta, fn } for freeDecay, { fn, zeta, f } for forced and base,
-// { fn, zeta, fr, f1, f2 } for sweep). The values below only fill the first frames before the native ones arrive.
+// { fn, zeta, fr, f1, f2 } for sweep, { pulse, tdOverT, zeta, fn } for pulse with pulse = 0 rect, 1 half-sine, 2 ramp). The values below only fill the first frames before the native ones arrive.
 const query = new URLSearchParams(location.search), drive = query.get('drive') || 'freeDecay';
 const DEFAULTS = { freeDecay: { fd: 9.98749218, zeta: .05 }, forced: { fn: 10, zeta: .05, f: 10 }, base: { fn: 10, zeta: .05, f: 20 },
-  sweep: { fn: 10, zeta: .05, fr: 9.975, f1: 9.461, f2: 10.464 } };
+  sweep: { fn: 10, zeta: .05, fr: 9.975, f1: 9.461, f2: 10.464 }, pulse: { pulse: 0, tdOverT: .8, zeta: 0, fn: 10 } };
 let sim, pending = DEFAULTS[drive] ?? null, queuedRelease, active = true;
 const send = (message) => window.webkit?.messageHandlers?.sim?.postMessage(message);
 window.simSetParams = p => { pending = p; sim?.update(p); };

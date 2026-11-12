@@ -1,6 +1,8 @@
 // Small pure helpers for the animated scenes. No three.js import here, so app.js can ask
 // "is WebGL there?" before loading the renderer, and tests/sim.test.mjs can run in Node.
 
+import { PULSES } from '../calcs.js';
+
 let webgl = null;
 // WebGL2 available? (three.js needs it.) Probed once; the probe context is released straight away.
 export function webglOK() {
@@ -19,9 +21,11 @@ export const timeScale = (f) => f / Math.min(Math.max(f, 0.4), 1.5);
 
 // Calculator → scene parameters, per drive. si: the SI inputs as entered, res: the calculator result.
 //   freeDecay rings at the measured fd with the computed ζ and fn; forced and base take fn, ζ and forcing f as entered;
-//   sweep takes the computed fn and exact ζ (so the drawn band edges land on the entered f1, f2) plus fr, f1, f2 for the markers.
+//   sweep takes the computed fn and exact ζ (so the drawn band edges land on the entered f1, f2) plus fr, f1, f2 for the markers;
+//   pulse takes the pulse shape as its index in calcs.js PULSES (numbers only: the iOS host sends [String: Double]), td/T, ζ and fn.
 export function simParamsFor(drive, si, res) {
   if (drive === 'freeDecay') return { fd: si.fd, zeta: res.zeta, fn: res.fn };
+  if (drive === 'pulse') return { pulse: PULSES.indexOf(res.kind), tdOverT: res.td_over_T, zeta: si.zeta, fn: si.fn };
   if (drive === 'sweep') return { fn: res.fn, zeta: res.zeta, fr: si.fr, f1: si.f1, f2: si.f2 };
   return { fn: si.fn, zeta: si.zeta, f: si.f };
 }

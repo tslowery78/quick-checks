@@ -4,7 +4,7 @@ import re, sys
 from playwright.sync_api import sync_playwright
 
 BASE = 'http://localhost:8765/'
-TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'forced_daf', 'logdec', 'halfpower', 'units']
+TOOLS = ['beam', 'section', 'sdof', 'miles', 'psd', 'margin', 'bolt', 'shaft', 'transmissibility', 'forced_daf', 'logdec', 'halfpower', 'dlf_pulse', 'units']
 fails = []
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -70,6 +70,36 @@ with sync_playwright() as p:
     shown = [o.inner_text() for o in pg.locator('.out output').all()]
     if shown != ['1', '0.625', '90', '10', '6.25', '1', '0'] or 'no resonant peak' not in pg.locator('main').inner_text(): fails.append(('forced_daf no-peak case shown', shown))
     pg.screenshot(path='screenshots/forced_daf-us.png', full_page=True)
+    pg.goto(BASE + '#/dlf_pulse'); pg.reload(); pg.wait_for_timeout(200)
+    n0 = pg.evaluate(NB); s0 = pg.evaluate(sig)
+    if n0 < 1000: fails.append(('dlf_pulse canvas blank', n0))
+    pg.locator('.row:has-text("Damping ratio") input').fill('0.2'); pg.wait_for_timeout(100)
+    if pg.evaluate(sig) == s0: fails.append(('dlf_pulse demo did not redraw',))
+    s0 = pg.evaluate(sig); pg.locator('.modes button', has_text='Half-sine').click(); pg.wait_for_timeout(100)
+    if pg.evaluate(sig) == s0: fails.append(('dlf_pulse demo did not redraw for another pulse shape',))
+    # refs/dlf_pulse.json rows by share link (fn 10 Hz → T 0.1 s; 100 N on 10 N/mm → 10 mm static). Outputs: T s, td/T, DLF, x_static mm, x_max mm, t_peak s, F_eq N.
+    # half-sine, td/T 1, ζ 0.05: DLF 1.62006, t_peak/T 0.67020, primary
+    pg.goto(BASE + '#/dlf_pulse?m=halfsine&td=0.1~s&fn=10~Hz&zeta=0.05&F0=100~N&k=10~N%2Fmm'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.1', '1', '1.62', '10', '16.2', '0.06702', '162'] or 'Primary peak' not in pg.locator('main').inner_text(): fails.append(('dlf_pulse half-sine ref case shown', shown))
+    # ramp, td/T 0.8, ζ 0.05: DLF 1.20298, t_peak/T 0.93557, residual
+    pg.goto(BASE + '#/dlf_pulse?m=ramp&td=0.08~s&fn=10~Hz&zeta=0.05&F0=100~N&k=10~N%2Fmm'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.1', '0.8', '1.203', '10', '12.03', '0.09356', '120.3'] or 'Residual peak' not in pg.locator('main').inner_text(): fails.append(('dlf_pulse ramp ref case shown', shown))
+    # rectangular, td/T 0.8, ζ 0.05: DLF 1.85447, t_peak/T 0.50063, primary
+    pg.goto(BASE + '#/dlf_pulse?m=rect&td=0.08~s&fn=10~Hz&zeta=0.05&F0=100~N&k=10~N%2Fmm'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.1', '0.8', '1.854', '10', '18.54', '0.05006', '185.4'] or 'Primary peak' not in pg.locator('main').inner_text(): fails.append(('dlf_pulse rect ref case shown', shown))
+    # hand check: undamped half-sine with td = T → DLF = √3 = 1.732, at t = 2T/3
+    pg.goto(BASE + '#/dlf_pulse?m=halfsine&td=0.1~s&fn=10~Hz&zeta=0&F0=100~N&k=10~N%2Fmm'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.1', '1', '1.732', '10', '17.32', '0.06667', '173.2']: fails.append(('dlf_pulse half-sine sqrt(3) shown', shown))
+    # US row: 25 lbf on 50 lbf/in → 0.5 in static; rectangular DLF 2 → 1 in, 50 lbf
+    pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','us')"); pg.goto(BASE + '#/dlf_pulse'); pg.reload(); pg.wait_for_timeout(200)
+    shown = [o.inner_text() for o in pg.locator('.out output').all()]
+    if shown != ['0.1', '0.8', '2', '0.5', '1', '0.05', '50']: fails.append(('dlf_pulse US defaults shown', shown))
+    pg.screenshot(path='screenshots/dlf_pulse-us.png', full_page=True)
+    pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','si')")
     # Known values
     pg.goto(BASE); pg.evaluate("localStorage.setItem('unitSystem','us')")
     pg.goto(BASE + '#/psd'); pg.reload(); pg.wait_for_timeout(150)
@@ -94,6 +124,8 @@ with sync_playwright() as p:
     run_driven_checks(p, 'transmissibility', 'base')
     from sim_scene_smoke import run_scene_checks
     run_scene_checks(p, 'halfpower', 'sweep')
+    from sim_pulse_smoke import run_pulse_checks
+    run_pulse_checks(p)
 print('console errors:', errs)
 print('failures:', fails)
 sys.exit(1 if errs or fails else 0)

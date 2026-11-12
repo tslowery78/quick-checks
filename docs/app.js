@@ -18,7 +18,7 @@ const h = (tag, attrs = {}, ...kids) => {
 let sys = localStorage.getItem('unitSystem') || 'us';
 const main = $('#main');
 const SIM_LABEL = { freeDecay: 'ShakeLab free decay', forced: 'ShakeLab force-driven response', base: 'ShakeLab base-driven response',
-  sweep: 'ShakeLab sweep through resonance' };
+  sweep: 'ShakeLab sweep through resonance', pulse: 'ShakeLab pulse response' };
 let disposeTool = () => {};
 const shakeBrand = () => h('div', { class: 'shakelab-brand' }, h('img', { src: 'assets/shakelab.png', alt: '' }), h('span', {}, 'ShakeLab', h('small', {}, 'Structural dynamics')));
 
@@ -122,7 +122,7 @@ function renderTool(tool, params) {
   let sim = null, ended = false, simParams = null;
   disposeTool = () => { ended = true; sim?.dispose(); window.removeEventListener('resize', redraw); };
   let lastSI = null;
-  const redraw = () => { if (demoCanvas && lastSI) tool.demo(lastSI, demoCanvas); };
+  const redraw = () => { if (demoCanvas && lastSI) tool.demo(lastSI, demoCanvas, mode); };
   if (demoCanvas) { window.removeEventListener('resize', window.__demoResize); window.__demoResize = redraw; window.addEventListener('resize', redraw); }
   const modeBar = tool.modes ? h('div', { class: 'modes', role: 'tablist' }, tool.modes.map(([k, label]) =>
     h('button', { type: 'button', 'data-k': k, onclick: () => { mode = k; update(); } }, label))) : null;

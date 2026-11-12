@@ -35,4 +35,9 @@ test('simParamsFor maps calculator inputs and results to each drive', () => {
   assert.deepEqual(simParamsFor('forced', si, res), { fn: 10, zeta: .05, f: 20 });                 // as entered
   assert.deepEqual(simParamsFor('base', si, res), { fn: 10, zeta: .05, f: 20 });
   assert.deepEqual(simParamsFor('sweep', si, res), { fn: 10.001, zeta: .0502, fr: 9.975, f1: 9.461, f2: 10.464 });   // computed fn, ζ; entered markers
+  // pulse: shape as its index in PULSES (the iOS host can only send numbers), td/T from the result, ζ and fn as entered.
+  const hit = { kind: 'halfsine', td_over_T: .8, zeta: .0502, fn: 10.001 };
+  assert.deepEqual(simParamsFor('pulse', si, hit), { pulse: 1, tdOverT: .8, zeta: .05, fn: 10 });
+  assert.deepEqual(['rect', 'halfsine', 'ramp'].map(kind => simParamsFor('pulse', si, { ...hit, kind }).pulse), [0, 1, 2]);
+  assert.equal(simParamsFor('pulse', si, { ...hit, kind: 'saw' }).pulse, -1);                       // unknown shape: the scene rejects index -1
 });

@@ -6,11 +6,13 @@ import { RoundedBoxGeometry } from '../vendor/three/examples/jsm/geometries/Roun
 // All dimensions below are schematic scene units; equilibrium sag is omitted.
 // drive 'freeDecay': drag and release the mass. 'forced' and 'sweep': an amber arrow on the mass shows F(t);
 // 'sweep' also lights the mass (emissive glow 0..1) while the forcing frequency is inside the half-power band.
+// 'pulse': the same arrow for one force pulse; the outline sits at the static deflection (setReference), a white line marks
+// rest and a yellow line (setPeak) marks the largest displacement so far.
 // 'base': the amber frame (plate, posts, beam, spring anchor) is the shaking base; it rides a fixed
 // pedestal, and a fixed white rail plus a ghost outline of the mass mark the ground frame.
 export const FREE_LENGTH = 1.65;
 export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFailure, reducedMotion }) {
-  const based = drive === 'base', forced = drive === 'forced' || drive === 'sweep';
+  const based = drive === 'base', pulse = drive === 'pulse', forced = drive === 'forced' || drive === 'sweep' || pulse;
   const LIFT = based ? .62 : 0, ORBIT = based ? 8.7 : 7.94, EYE = based ? 3.45 : 3.1, ARROW = .8;
   const renderer = new T.WebGLRenderer({ canvas, antialias: true, alpha: false });
   let environment, pmrem, room, controls;
@@ -104,11 +106,11 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
     mass = box(0, 1.25 + LIFT, 0, 1.38, .56, .94, teal);
     const basic = (color, opacity) => { const m = new T.MeshBasicMaterial({ color, transparent: true, opacity }); materials.add(m); return m; };
     const marker = (x, y, z, w, h, d, mat) => { const m = mesh(new T.BoxGeometry(w, h, d), mat, x, y, z); m.castShadow = false; m.receiveShadow = false; return m; };
-    let arrow, shaft, head, band = [];
-    if (based || forced) {                            // ghost outline: where the mass rests in the ground frame
+    let arrow, shaft, head, band = [], ghost, peakLine;
+    if (based || forced) {                            // ghost outline: where the mass rests in the ground frame (pulse: where the static load would hold it)
       const edges = new T.EdgesGeometry(new T.BoxGeometry(1.4, .58, .96)); geometries.add(edges);
       const lineMat = new T.LineBasicMaterial({ color: '#b8fff5', transparent: true, opacity: .7 }); materials.add(lineMat);
-      const ghost = new T.LineSegments(edges, lineMat); ghost.position.set(0, 1.25 + LIFT, 0); scene.add(ghost);
+      ghost = new T.LineSegments(edges, lineMat); ghost.position.set(0, 1.25 + LIFT, 0); scene.add(ghost);
     }
     if (based) {
       box(0, .04, 0, 2.2, .3, 1.45, dark);            // fixed shaker pedestal on the floor
@@ -119,7 +121,8 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
     }
     if (forced) {
       const white = basic('#f2f8ff', .9);             // fixed lines at rest ± the reference amplitude (moved by setReference)
-      band = [1, -1].map(side => { const m = marker(0, 1.25, .5, 1.5, .016, .016, white); m.userData.side = side; return m; });
+      band = (pulse ? [0] : [1, -1]).map(side => { const m = marker(0, 1.25, .5, 1.5, .016, .016, white); m.userData.side = side; return m; });
+      if (pulse) { peakLine = marker(0, 1.25, .53, 1.72, .03, .03, basic('#ffe45c', 1)); peakLine.visible = false; }
       const hot = material({ color: '#ffb347', emissive: '#c05a00', emissiveIntensity: .7, metalness: .2, roughness: .4 });
       arrow = new T.Group(); arrow.position.set(0, 1.25, .64); scene.add(arrow);
       const shaftGeo = new T.CylinderGeometry(.04, .04, 1, 16); shaftGeo.translate(0, .5, 0);
@@ -203,14 +206,18 @@ export function createRig(canvas, { drive = 'freeDecay', onPull, onRelease, onFa
           verified = true;
         }
       },
-      // Scene units from rest to the white reference lines (forced: x_static; sweep: peak/√2).
-      setReference(unit) { for (const m of band) m.position.y = 1.25 + m.userData.side * unit; },
+      // Scene units from rest to the white reference lines (forced: x_static; sweep: peak/√2). pulse: the white line stays at
+      // rest and the outline moves up to the static deflection.
+      setReference(unit) { for (const m of band) m.position.y = 1.25 + m.userData.side * unit; if (pulse) ghost.position.y = 1.25 + unit; },
+      // pulse: scene units from rest up to the largest displacement so far; hidden until the mass has moved.
+      setPeak(y) { if (peakLine) { peakLine.visible = y > 1e-4; peakLine.position.y = 1.25 + y; } },
       resize(w, h) { renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); },
       snapshot() {
         const p = mass.position.clone().project(camera), r = canvas.getBoundingClientRect();
         // massY, baseY: mesh displacement from rest in scene units, positive up, ground frame.
         return { camera: camera.position.toArray(), pulling, pixelRange, vertices: pos.length / 3,
           massY: mass.position.y - 1.25 - LIFT, baseY: frame.position.y - LIFT, glow: teal.emissiveIntensity, arrow: arrow ? (arrow.rotation.z ? -1 : 1) * (shaft.scale.y + .26 * head.scale.y) : 0,
+          ghostY: ghost ? ghost.position.y - 1.25 - LIFT : 0, peakY: peakLine?.visible ? peakLine.position.y - 1.25 : 0,
           massScreen: { x: r.left + (p.x + 1) * r.width / 2, y: r.top + (1 - p.y) * r.height / 2 } };
       },
       dispose: clean

@@ -309,6 +309,7 @@ export function sweepState(t, fn, zeta, { duration = 12, from = .5, to = 1.5, fa
 // (Duhamel integral done analytically), no time stepping. Internally time is in periods T = 1/fn and
 // displacement in x_static, so ωn = 2π.
 export const PULSES = ['rect', 'halfsine', 'ramp'];
+export const PULSE_MAX_RATIO = 2000;   // largest td/T accepted for the half-sine
 
 // (e^z − 1)/z for complex z = u + iv, accurate near z = 0 (returns [re, im]).
 function expm1Over(u, v) {
@@ -353,6 +354,8 @@ function pulseState(kind, t, td, zeta) {
 function pulseArgs(kind, tdOverT, zeta) {
   if (!PULSES.includes(kind)) throw new Error('Pulse type must be rect, halfsine or ramp.');
   if (!(tdOverT > 0) || !(zeta >= 0) || !(zeta < 1) || !Number.isFinite(tdOverT)) throw new Error('Need td > 0, fn > 0 and 0 ≤ ζ < 1 (underdamped).');
+  // The half-sine peak search costs 64 velocity evaluations per period of pulse: stop before it can freeze a page.
+  if (kind === 'halfsine' && tdOverT > PULSE_MAX_RATIO) throw new Error(`Half-sine td/T above ${PULSE_MAX_RATIO} is not supported: that load is quasi-static (DLF within 0.03% of 1).`);
 }
 
 // Scene drive and time plot. t and td in periods T; returns x/x_static, ẋ·T/x_static and F/F0.

@@ -73,3 +73,38 @@ test('forced_daf spec: SI in (N, N/m), SI out (m), matches scipy refs; scene hoo
   assert.deepEqual(spec.inputs.map(i => i.key), ['fn', 'zeta', 'f', 'F0', 'k']);
   close(o.DAF, 10); close(o.X, 0.1); close(o.phase_lag_deg, 90);       // hand: 1/(2·0.05) = 10; 100 N / 10 kN/m = 10 mm → 100 mm
 });
+
+test('dlf_pulse spec: SI in (s, Hz, N, N/m), SI out (s, m, N), matches scipy refs; scene hook, peak note, scene parameters', () => {
+  const spec = TOOLS.find(t => t.id === 'dlf_pulse');
+  assert.deepEqual(spec.sim, { kind: 'sdofRig', drive: 'pulse' });
+  assert.deepEqual(spec.modes.map(m => m[0]), ['rect', 'halfsine', 'ramp']);
+  assert.deepEqual(spec.inputs.map(i => i.key), ['td', 'fn', 'zeta', 'F0', 'k']);
+  assert.deepEqual(spec.outputs.map(o => o.key), ['T', 'td_over_T', 'DLF', 'x_static', 'x_max', 't_peak', 'F_eq']);
+  const refs = JSON.parse(readFileSync(new URL('./refs/dlf_pulse.json', import.meta.url)));
+  // The refs are normalized (td/T, x/x_static). Dimensional case: fn 12.5 Hz (T 0.08 s), 80 N on 4 N/mm → 20 mm static.
+  const fn = 12.5, F0 = 80, kNmm = 4;
+  for (const c of refs.dlf) {
+    const si = { td: c.td_over_T / fn, fn, zeta: c.zeta, F0, k: kNmm * 1000 }, o = spec.compute(si, c.kind);   // N/mm → N/m
+    close(o.T, .08); close(o.td_over_T, c.td_over_T); close(o.DLF, c.DLF);
+    close(o.x_static, .02); close(o.x_max, c.DLF * .02); close(o.F_eq, c.DLF * 80);                              // m, m, N
+    if (c.zeta > 0) { assert.ok(Math.abs(o.t_peak - c.t_peak_over_T * .08) <= 1e-4 * .08, `${o.t_peak} ${JSON.stringify(c)}`); assert.equal(o.phase, c.phase); }
+    for (const out of spec.outputs) assert.ok(Number.isFinite(o[out.key]), out.key);
+    // The note under the results names the same phase as the result.
+    assert.deepEqual(o._table.head, ['Peak']); assert.equal(o._table.rows.length, 1);
+    assert.match(o._table.rows[0][0], o.primary ? /^Primary peak: / : /^Residual peak: /);
+    assert.equal(o.primary, o.t_peak < si.td);
+    // The scene gets numbers only: pulse shape as its index, td/T, ζ, fn.
+    const p = simParamsFor('pulse', si, o);
+    assert.deepEqual(p, { pulse: ['rect', 'halfsine', 'ramp'].indexOf(c.kind), tdOverT: o.td_over_T, zeta: c.zeta, fn });
+    for (const v of Object.values(p)) assert.equal(typeof v, 'number');
+  }
+  // Page defaults (SI row): rectangular, td 0.08 s, fn 10 Hz, ζ 0, 100 N, 10 N/mm → DLF 2, 10 mm static, 20 mm peak at T/2 = 0.05 s, 200 N.
+  const d = Object.fromEntries(spec.inputs.map(i => [i.key, i.def[1]]));
+  assert.deepEqual(d, { td: .08, fn: 10, zeta: 0, F0: 100, k: 10 });
+  const o = spec.compute({ ...d, k: d.k * 1000 }, 'rect');
+  close(o.T, .1); close(o.td_over_T, .8); close(o.DLF, 2); close(o.x_static, .01); close(o.x_max, .02); close(o.t_peak, .05); close(o.F_eq, 200);
+  // Invalid inputs throw (the page shows the message and keeps the scene paused); an unknown mode is not silently a rectangle.
+  for (const bad of [{ td: 0 }, { fn: 0 }, { zeta: 1 }, { zeta: -.1 }, { F0: -1 }, { k: 0 }, { td: NaN }])
+    assert.throws(() => spec.compute({ td: .08, fn: 10, zeta: 0, F0: 100, k: 1e4, ...bad }, 'rect'), JSON.stringify(bad));
+  assert.throws(() => spec.compute({ td: .08, fn: 10, zeta: 0, F0: 100, k: 1e4 }, 'triangle'));
+});

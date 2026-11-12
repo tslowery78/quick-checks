@@ -1,13 +1,17 @@
-import { freeDecay, forcedResponse, baseResponse, sweepState } from '../calcs.js';
+import { freeDecay, forcedResponse, baseResponse, sweepState, pulseResponse, pulsePeak, PULSES } from '../calcs.js';
 import { webglOK, timeScale, timeLabel, peakTravel } from './support.js';
 
-// One spring-mass rig, four drives:
+// One spring-mass rig, five drives:
 //   freeDecay  params { fd, zeta, fn }   pull the mass and let go (displacement in scene units, not to scale)
 //   forced     params { fn, zeta, f }    F(t) = F0·sin(ωt) on the mass, from rest; motion in units of x_static
 //   base       params { fn, zeta, f }    base y(t) = Y·sin(ωt), from rest; absolute motion in units of Y
 //   sweep      params { fn, zeta, fr, f1, f2 }   sine force swept 0.5·fn → 1.5·fn in LOOP seconds of playback, shown
 //              QUASI-STEADY (each frequency at its steady state, calcs.js sweepState); motion in units of the peak
 //              amplitude. A strip under the scene traces amplitude against frequency with fr, f1, f2 and the band.
+//   pulse      params { pulse, tdOverT, zeta, fn }   one force pulse on the mass from rest: pulse = index in calcs.js PULSES
+//              (0 rect, 1 half-sine, 2 ramp then held), duration td/T in natural periods; motion in units of x_static.
+//              The outline marks the static deflection (x = 1), a yellow line latches at the largest x so far, and the
+//              corner gauge traces F(t) and x(t). The motion is not looped: the button replays the hit from rest.
 // Driven rigs draw upward-positive, ground-frame motion times one labeled visual scale (`unit`, scene units
 // per normalized unit) chosen so the largest excursion from rest stays inside the frame.
 const COPY = {
@@ -17,11 +21,15 @@ const COPY = {
     aria: 'Spring and mass driven by a sinusoidal force, shown as an amber arrow on the teal block. Drag to orbit.', hint: 'Amber arrow = force F(t) · white lines = ± x_static · drag to orbit' },
   sweep: { tag: 'AMPLITUDE ×1/PEAK · VISUAL SCALE', button: '⟳ Sweep it', again: 'Sweep it', flat: '2D spring and mass swept through resonance by a sinusoidal force',
     aria: 'Spring and mass driven by a sinusoidal force whose frequency sweeps slowly through resonance. The teal block glows inside the half-power band. Drag to orbit.', hint: 'Amber arrow = force F(t) · white lines = ± peak/√2 · block glows from f₁ to f₂' },
+  pulse: { tag: '×1/x_static · VISUAL SCALE', button: '↥ Hit it', again: 'Hit it', flat: '2D spring and mass hit by one force pulse',
+    aria: 'Spring and mass hit by one force pulse, shown as an amber arrow on the teal block. An outline marks the static deflection and a yellow line latches at the peak. Drag to orbit.', hint: 'Amber arrow = force F(t) · outline = static deflection · yellow line = peak so far' },
   base: { tag: 'MOTION ×1/Y · VISUAL SCALE', button: '⇅ Shake it', again: 'Shake it', flat: '2D spring and mass on a shaking base',
     aria: 'Spring and mass hanging from an amber frame that shakes up and down on a fixed pedestal. Drag to orbit.', hint: 'Amber frame = base y(t) · teal block = mass x(t) · white rail = fixed ground' },
 };
 const TRAVEL = .6, BASE_TRAVEL = .34;   // scene units available to the spring stretch and to the base plate
 const LOOP = 12, SWEEP_TO = 1.5;        // sweep: seconds of playback per pass, and the top of the sweep in units of fn
+const LEAD = .4;                        // pulse: seconds of playback at rest between the button and the hit
+const PULSE_NAME = ['rectangular', 'half-sine', 'ramp (held)'];
 const fix = (v) => v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v >= .1 ? v.toFixed(2) : v.toPrecision(2);
 
 export async function mountSim(container, { kind, drive, params, reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches, onReady = () => {}, onPeak = () => {} }) {
@@ -37,12 +45,16 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
   let y = 0, force = 0, gain = 1, phase = 0, unit = TRAVEL, running = !reducedMotion, seen = 0;   // seen: largest |x| since restart (gauge scale)
   // sweep: last sweepState, its options { duration (physical s), from, to }, the amplitude curve for the trace, and the mass glow 0..1.
   let sw = null, span = null, curve = [], lit = 0;
+  // pulse: exact peak { DLF, t_peak_over_T, phase }, when the largest x so far happened (periods), whether the exact peak has
+  // been passed (then `seen` is the exact DLF), the gauge window in periods, and the last frame's summary for tests and hosts.
+  let peak = null, seenAt = 0, latched = false, win = 3, pl = null;
+  const rest = () => { x = y = force = peaks = seen = lit = seenAt = 0; latched = false; pl = null; time = drive === 'pulse' && scale ? -LEAD / scale : 0; };
   const reference = () => drive === 'sweep' ? unit * Math.SQRT1_2 : unit;   // where the white lines sit: ± peak/√2, or ± x_static
   function release(fraction = .3) {
     if (disposed) return;
     dragging = false;
     if (!valid || !Number.isFinite(fraction)) return;
-    if (driven) { running = true; x = y = force = time = peaks = seen = lit = 0; onPeak(0); schedule(); return; }
+    if (driven) { running = true; rest(); onPeak(0); schedule(); return; }
     x0 = Math.max(-.4, Math.min(.4, fraction)) * 1.65; x = x0; time = 0; peaks = 0; flash = 0; dragging = false; onPeak(0); schedule();
   }
   function steady(next) {
@@ -51,6 +63,17 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
       curve = Array.from({ length: 161 }, (_, i) => sweepState(span.duration * Math.min(i / 160, 1 - 1e-12), next.fn, next.zeta, span).amp);
       sw = sweepState(0, next.fn, next.zeta, span); gain = sw.amp; phase = sw.phaseDeg; unit = TRAVEL;
       rig?.setReference(reference()); return;
+    }
+    if (drive === 'pulse') {
+      const kind = PULSES[next.pulse], td = next.tdOverT, eq = kind === 'ramp' ? 1 : 0;
+      peak = pulsePeak(kind, td, next.zeta); gain = peak.DLF; phase = 0;
+      // Visual scale: the peak, the static deflection and the free swing below rest after the pulse (envelope amplitude
+      // about the final load) all stay inside the travel.
+      const end = pulseResponse(td, kind, td, next.zeta), w = 2 * Math.PI, a = next.zeta * w, wd = w * Math.sqrt(1 - next.zeta ** 2);
+      unit = TRAVEL / Math.max(1, peak.DLF, Math.hypot(end.x - eq, (end.v + a * (end.x - eq)) / wd) - eq);
+      win = Math.max(3, Math.ceil(td + 2));
+      curve = Array.from({ length: 201 }, (_, i) => pulseResponse(win * i / 200, kind, td, next.zeta));
+      rig?.setReference(unit); return;
     }
     const r = next.f / next.fn, c = 2 * next.zeta * r, d = 1 - r * r, D = 1 / Math.hypot(d, c);
     if (drive === 'forced') {           // DAF and lag of displacement behind force
@@ -64,19 +87,20 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
   }
   function update(next) {
     const wasValid = valid, ok = (v) => Number.isFinite(v) && v > 0;
-    valid = !!next && (drive === 'sweep' ? ok(next.fn) && ok(next.zeta) && next.zeta < Math.SQRT1_2 && ok(next.fr) && ok(next.f1) && ok(next.f2) && next.f1 < next.f2
+    const pulseOK = (q) => { try { return Number.isFinite(pulsePeak(PULSES[q.pulse], q.tdOverT, q.zeta).DLF); } catch { return false; } };
+    valid = !!next && (drive === 'pulse' ? ok(next.fn) && pulseOK(next) : drive === 'sweep' ? ok(next.fn) && ok(next.zeta) && next.zeta < Math.SQRT1_2 && ok(next.fr) && ok(next.f1) && ok(next.f2) && next.f1 < next.f2
       : driven ? ok(next.fn) && ok(next.f) && ok(next.zeta)
       : Number.isFinite(next.fd) && next.fd > 0 && Number.isFinite(next.zeta) && next.zeta >= 0 && next.zeta < 1);
     button.disabled = !valid;
     if (!valid) {
-      dragging = false; x0 = x = y = force = time = peaks = flash = seen = lit = 0; sw = null;
+      dragging = false; x0 = x = y = force = time = peaks = flash = seen = lit = seenAt = 0; sw = pl = null; latched = false;
       hud.textContent = 'Enter valid calculator inputs'; schedule(); return;
     }
     if (driven) {
       const changed = !p || Object.keys(next).some(k => p[k] !== next[k]);
-      p = { ...next }; scale = timeScale(drive === 'sweep' ? SWEEP_TO * p.fn : p.f);   // sweep: its fastest forcing plays at ≤ 1.5 Hz
+      p = { ...next }; scale = timeScale(drive === 'sweep' ? SWEEP_TO * p.fn : drive === 'pulse' ? p.fn : p.f);   // sweep: its fastest forcing plays at ≤ 1.5 Hz; pulse: the ringing at fn
       if (changed || !sw && drive === 'sweep') steady(p);
-      if (changed || !wasValid) { x = y = force = time = peaks = seen = lit = 0; if (!reducedMotion) running = true; if (frames) onPeak(0); }  // new inputs restart from rest
+      if (changed || !wasValid) { rest(); if (!reducedMotion) running = true; if (frames) onPeak(0); }  // new inputs restart from rest
       schedule(); return;
     }
     const changed = p && (p.fd !== next.fd || p.zeta !== next.zeta);
@@ -98,8 +122,8 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
     const d = Math.min(devicePixelRatio || 1, 2); ctx.setTransform(d, 0, 0, d, 0, 0);
     ctx.fillStyle = '#101e2a'; ctx.fillRect(0, 0, width, height);
     const px = height * .19, at = pose(), inset = drive === 'base' ? 16 : 0, shift = at.base * px;
-    const cx = width / 2, rest = height * .62, yy = rest + at.mass * px, top = 34 + inset + shift, ground = height - 28 - (strip ? 44 : driven ? 30 : 0), foot = ground + shift;   // driven: clear the two- or three-line HUD
-    if (driven) { ctx.strokeStyle = '#b8fff5'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.strokeRect(cx - 46, rest - 28, 92, 52); ctx.setLineDash([]); }
+    const cx = width / 2, home = height * .62, yy = home + at.mass * px, top = 34 + inset + shift, ground = height - 28 - (strip || drive === 'pulse' ? 44 : driven ? 30 : 0), foot = ground + shift;   // driven: clear the two- or three-line HUD
+    if (driven) { ctx.strokeStyle = '#b8fff5'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.strokeRect(cx - 46, home - 28 - (drive === 'pulse' ? unit * px : 0), 92, 52); ctx.setLineDash([]); }   // pulse: outline at the static deflection
     ctx.strokeStyle = '#b9cfdd'; ctx.lineWidth = 3; ctx.beginPath(); ctx.moveTo(cx, top);
     for (let i = 0; i <= 72; i++) ctx.lineTo(cx + Math.sin(i / 72 * Math.PI * 18) * 19, top + (yy - 28 - top) * i / 72);
     ctx.stroke(); ctx.fillStyle = lit > .5 ? '#5ff5e6' : '#10b9ac'; ctx.fillRect(cx - 46, yy - 28, 92, 52);
@@ -108,8 +132,12 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
       ctx.fillRect(cx - 90, top, 5, foot - top); ctx.fillRect(cx + 85, top, 5, foot - top);
       ctx.fillStyle = '#f2f8ff'; ctx.fillRect(cx - 120, ground - 1, 240, 2);
     }
-    if (drive === 'forced' || drive === 'sweep') {
-      ctx.fillStyle = '#f2f8ff'; for (const s of [-1, 1]) ctx.fillRect(cx - 60, rest - 2 + s * reference() * px - 1, 120, 2);
+    if (drive === 'pulse') {            // white line = rest, yellow line = largest displacement so far
+      ctx.fillStyle = '#f2f8ff'; ctx.fillRect(cx - 60, home - 3, 120, 2);
+      if (seen > 0) { ctx.fillStyle = '#ffe45c'; ctx.fillRect(cx - 68, home - 3 - unit * seen * px - 1, 136, 3); }
+    }
+    if (drive === 'forced' || drive === 'sweep' || drive === 'pulse') {
+      if (drive !== 'pulse') { ctx.fillStyle = '#f2f8ff'; for (const s of [-1, 1]) ctx.fillRect(cx - 60, home - 2 + s * reference() * px - 1, 120, 2); }
       const tip = yy - 2 - force * .8 * px, dir = Math.sign(force) || 1;
       ctx.strokeStyle = ctx.fillStyle = '#ffb347'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(cx, yy - 2); ctx.lineTo(cx, tip + dir * Math.min(10, Math.abs(tip - yy + 2))); ctx.stroke();
       if (Math.abs(force) > .02) { ctx.beginPath(); ctx.moveTo(cx, tip); ctx.lineTo(cx - 9, tip + dir * 13); ctx.lineTo(cx + 9, tip + dir * 13); ctx.fill(); }
@@ -134,6 +162,25 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
         g.fillText(name, cx + (R - 11) * Math.cos(angle + .45), cy - (R - 11) * Math.sin(angle + .45));
       }
       g.fillStyle = '#d9e9f1'; g.fillText(`x lags F ${phase.toFixed(0)}°`, cx, 93);
+    } else if (drive === 'pulse') {
+      // Time history in periods T: faint = the whole exact F(t) (amber) and x(t) (teal), bright = so far, dot = now,
+      // dashed = static deflection, yellow tick = largest x so far (the exact peak once it has been passed).
+      const L = 8, R = w - 8, T0 = 9, B = 76, n = curve.length - 1, tp = Math.max(0, time) * p.fn;
+      const lo = Math.min(0, ...curve.map(c => c.x)), hi = Math.max(1, peak.DLF) * 1.06;
+      const X = (t) => L + (R - L) * Math.min(t, win) / win, Y = (v) => B - (B - T0) * (v - lo) / (hi - lo);
+      g.strokeStyle = '#3d5868'; g.lineWidth = 1; g.beginPath(); g.moveTo(L, Y(0)); g.lineTo(R, Y(0)); g.stroke();
+      g.strokeStyle = 'rgba(242,248,255,.6)'; g.setLineDash([3, 3]); g.beginPath(); g.moveTo(L, Y(1)); g.lineTo(R, Y(1)); g.stroke(); g.setLineDash([]);
+      const done = time < 0 ? -1 : Math.min(n, Math.floor(tp / win * n));
+      for (const [key, faint, bright, now] of [['F', 'rgba(255,179,71,.3)', '#ffb347', force], ['x', 'rgba(47,224,208,.3)', '#2fe0d0', x]]) {
+        const path = (upto) => { g.beginPath(); for (let i = 0; i <= upto; i++) g[i ? 'lineTo' : 'moveTo'](L + (R - L) * i / n, Y(curve[i][key])); };
+        g.strokeStyle = faint; g.lineWidth = 1.5; path(n); g.stroke();
+        if (done >= 0) { g.strokeStyle = bright; g.lineWidth = 2; path(done); if (tp < win) g.lineTo(X(tp), Y(now)); g.stroke(); }
+      }
+      if (seen > 0) { g.strokeStyle = g.fillStyle = '#ffe45c'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(seenAt) - 7, Y(seen)); g.lineTo(X(seenAt) + 7, Y(seen)); g.stroke(); }
+      if (time >= 0) { g.fillStyle = '#f2f8ff'; g.beginPath(); g.arc(X(tp), Y(x), 3, 0, 2 * Math.PI); g.fill(); }
+      g.textAlign = 'left'; g.fillStyle = '#ffb347'; g.fillText('F', L + 2, 86); g.fillStyle = '#2fe0d0'; g.fillText('x', L + 12, 86);
+      g.textAlign = 'right'; g.fillStyle = '#9eb8c5'; g.fillText(`${win} T`, R, 86);
+      g.textAlign = 'center'; g.fillStyle = latched ? '#ffe45c' : '#d9e9f1'; g.fillText(latched ? `DLF ${peak.DLF.toFixed(2)}` : `max ${seen.toFixed(2)}`, w / 2, 96);
     } else {
       seen = Math.max(seen, Math.abs(x));   // start-up overshoot can exceed the steady gain: grow the scale, never clip
       const cy = 44, H = 30, top = Math.max(1, gain, seen);
@@ -193,6 +240,18 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
         sw = sweepState(Math.min(time, span.duration * (1 - 1e-12)), p.fn, p.zeta, span);
         ({ x, force } = sw); gain = sw.amp; phase = sw.phaseDeg; count = Math.floor(sw.theta / (2 * Math.PI) + 1e-9);
         lit += ((sw.inBand ? 1 : 0) - lit) * Math.min(1, dt * 10);
+      } else if (drive === 'pulse') {
+        // time < 0 is the lead-in at rest. After that the exact response at t/T = time·fn; the largest x so far latches
+        // onto the exact peak once its time has passed (frames never land exactly on it).
+        const tp = Math.max(0, time) * p.fn, kind = PULSES[p.pulse];
+        if (time >= 0) {
+          const s = pulseResponse(tp, kind, p.tdOverT, p.zeta); x = s.x; force = s.F;
+          if (!latched && tp >= peak.t_peak_over_T) { seen = peak.DLF; seenAt = peak.t_peak_over_T; latched = true; flash = 1; }
+          else if (!latched && x > seen) { seen = x; seenAt = tp; }
+        }
+        count = Math.floor(tp + 1e-9);                       // natural periods since the hit
+        pl = { t: tp, kind, tdOverT: p.tdOverT, max: seen, at: seenAt, latched, DLF: peak.DLF, tPeak: peak.t_peak_over_T, phase: peak.phase,
+          tag: seen > 0 ? (seenAt < p.tdOverT ? 'primary' : 'residual') : 'at rest' };
       } else {
         if (drive === 'forced') { x = forcedResponse(time, p.fn, p.zeta, p.f).x; force = Math.sin(2 * Math.PI * p.f * time); }
         else ({ x, y } = baseResponse(time, p.fn, p.zeta, p.f));
@@ -207,6 +266,7 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
     }
     flash = Math.max(0, flash - dt * 3);
     if (valid && drive === 'sweep') hud.textContent = `f ${fix(sw.f)} Hz · r ${sw.r.toFixed(3)} · amplitude ${sw.amp.toFixed(2)} (×1/peak)\nζ ${p.zeta.toFixed(4)} · Q ${fix(p.fr / (p.f2 - p.f1))} · ${timeLabel(scale)}${sw.inBand ? ' · IN BAND' : ''}\nquasi-steady sweep: each frequency shown at steady state`;
+    else if (valid && drive === 'pulse') hud.textContent = `${PULSE_NAME[p.pulse]} pulse · td/T ${fix(p.tdOverT)} · ${timeLabel(scale)}\nDLF live max ${seen.toFixed(2)} · ${pl.tag}${latched ? ' · peak latched' : ''}\ndisplacement normalized (×1/x_static)`;
     else if (valid && drive === 'forced') hud.textContent = `r ${fix(p.f / p.fn)} · DAF ${fix(gain)} · lag φ ${phase.toFixed(1)}° · ${timeLabel(scale)}\ndisplacement normalized (×1/x_static, visual scale)`;
     else if (valid && driven) hud.textContent = `r ${fix(p.f / p.fn)} · TR ${fix(gain)} · phase ${phase.toFixed(1)}° · ${timeLabel(scale)}\nmotion normalized (×1/Y), visual scale`;
     else if (valid) hud.textContent = `${timeLabel(scale)}  ·  peaks ${peaks}  ·  ζ ${p.zeta.toFixed(4)}`;
@@ -214,7 +274,8 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
     if (trace) { trace.hidden = !valid; if (valid) drawTrace(); }
     try {
       if (rig) {
-        const at = pose(); rig.draw(at.mass, age, flash, at.base, force, lit);
+        const at = pose(); if (drive === 'pulse') rig.setPeak(unit * seen);
+        rig.draw(at.mass, age, flash, at.base, force, lit);
         if (!ready) { ready = true; mode.textContent = '3D rig'; container.dataset.renderer = 'webgl'; onReady({ renderer: 'webgl', ...rig.snapshot() }); }
       } else if (ctx) draw2D();
     } catch (error) { fallback('3D rendering unavailable'); }
@@ -229,7 +290,7 @@ export async function mountSim(container, { kind, drive, params, reducedMotion =
   // Read-only state for tests and hosts. massY/baseY are the drawn displacements from rest in scene units,
   // positive up, ground frame (read back from the meshes in 3D); x, y, force are the physics values.
   const snapshot = () => ({ renderer: container.dataset.renderer, drive, disposed, frames, active: !!raf, visible, hostActive, time, x, x0, peaks, params: p, scale, dragging,
-    y, force, gain, phase, unit, running, massY: -pose().mass, baseY: -pose().base, inBand: !!sw?.inBand, lit, sweep: sw, span, ...rig?.snapshot() });
+    y, force, gain, phase, unit, running, massY: -pose().mass, baseY: -pose().base, inBand: !!sw?.inBand, lit, sweep: sw, span, pulse: pl, ...rig?.snapshot() });
   const state = () => snapshot();
   const api = {
     update, release, snapshot,

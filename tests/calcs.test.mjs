@@ -381,3 +381,105 @@ test('sweepState: forcing phase θ is the integral of f, and the loop wrap is a 
   // fade = 0 switches the envelope off (documented option).
   assert.equal(C.sweepState(.01, fn, zeta, { duration: D, fade: 0 }).w, 1);
 });
+
+// ---------- dlf_pulse: DLF of an SDOF under one rectangular, half-sine or ramp pulse ----------
+const pulseRefs = JSON.parse(readFileSync(new URL('./refs/dlf_pulse.json', import.meta.url)));
+
+test('pulsePeak: DLF matches the scipy refs (1e-6); peak time and primary/residual for ζ > 0', () => {
+  assert.equal(pulseRefs.dlf.length, 72);
+  let damped = 0;
+  for (const c of pulseRefs.dlf) {
+    const got = C.pulsePeak(c.kind, c.td_over_T, c.zeta), tag = JSON.stringify(c);
+    assert.ok(Math.abs(got.DLF - c.DLF) <= 1e-6 * Math.max(1, Math.abs(c.DLF)), `DLF ${got.DLF} ${tag}`);
+    if (c.zeta > 0) {                       // undamped peaks repeat every period, so their time is not unique
+      assert.ok(Math.abs(got.t_peak_over_T - c.t_peak_over_T) <= 1e-4, `t_peak ${got.t_peak_over_T} ${tag}`);
+      assert.equal(got.phase, c.phase, tag); damped++;
+    }
+    assert.ok(['primary', 'residual'].includes(got.phase));
+    assert.equal(got.phase === 'primary', got.t_peak_over_T < c.td_over_T);
+  }
+  assert.ok(damped >= 24, `damped rows ${damped}`);
+  for (const kind of C.PULSES) assert.ok(pulseRefs.dlf.some(c => c.kind === kind), kind);
+});
+
+test('pulseResponse: x and F match the scipy time-history refs (1e-6 abs)', () => {
+  assert.equal(pulseRefs.motion.length, 75);
+  for (const c of pulseRefs.motion) {
+    const got = C.pulseResponse(c.t_over_T, c.kind, c.td_over_T, c.zeta), tag = JSON.stringify(c);
+    assert.ok(Math.abs(got.x - c.x) <= 1e-6, `x ${got.x} ${tag}`);
+    assert.ok(Math.abs(got.F - c.F) <= 1e-6, `F ${got.F} ${tag}`);
+  }
+});
+
+test('pulsePeak hand checks: undamped closed forms and short-pulse (impulse) limits', () => {
+  const dlf = (kind, q, z = 0) => C.pulsePeak(kind, q, z).DLF;
+  // Rectangular: 2·sin(π·td/T) below td/T = 0.5 (peak after the pulse), the full 2 from 0.5 up (peak during it).
+  for (const q of [.01, .1, .25, 1 / 3, .49]) { near(dlf('rect', q), 2 * Math.sin(Math.PI * q), 1e-12); assert.equal(C.pulsePeak('rect', q, 0).phase, 'residual'); }
+  near(dlf('rect', 1 / 6), 1, 1e-12);                                   // 2·sin(30°)
+  for (const q of [.5, .75, 1, 2.5, 40]) near(dlf('rect', q), 2, 1e-12);
+  for (const q of [.51, 1, 40]) { const p = C.pulsePeak('rect', q, 0); assert.equal(p.phase, 'primary'); near(p.t_peak_over_T, .5, 1e-12); }
+  // Ramp held at F0: 1 + |sin(π·td/T)|/(π·td/T). Whole periods of rise leave no overshoot.
+  for (const q of [.05, .3, .5, .8, 1.5, 2.25, 7.3]) near(dlf('ramp', q), 1 + Math.abs(Math.sin(Math.PI * q)) / (Math.PI * q), 1e-11);
+  near(dlf('ramp', .5), 1 + 2 / Math.PI, 1e-12);
+  for (const q of [1, 2, 5]) near(dlf('ramp', q), 1, 1e-12);
+  for (const q of [.05, .8, 3]) assert.equal(C.pulsePeak('ramp', q, 0).phase, 'residual');   // never before the rise ends
+  // Half-sine with td = T: DLF = √3.
+  near(dlf('halfsine', 1), Math.sqrt(3), 1e-12);
+  // Short pulses act as an impulse I = ∫F dt: DLF → ωn·I/F0 = 2π·td/T (rectangular, I = F0·td) and 4·td/T (half-sine, I = 2·F0·td/π).
+  for (const q of [1e-3, 1e-5]) { near(dlf('rect', q), 2 * Math.PI * q, 2 * q * q * 10); near(dlf('halfsine', q), 4 * q, 2 * q * q * 10); }
+  near(dlf('rect', 1e-3), 2 * Math.PI * 1e-3, 1e-5); near(dlf('halfsine', 1e-3), 4e-3, 1e-5);
+  // A ramp far shorter than T is a sudden step: DLF → 2.
+  near(dlf('ramp', 1e-4), 2, 1e-7); near(dlf('ramp', 1e-2), 2, 2e-4);
+  // Long half-sine is quasi-static (DLF → 1 from above, undamped); damping only lowers a DLF.
+  assert.ok(dlf('halfsine', 50) > 1 && dlf('halfsine', 50) < 1.02);
+  for (const kind of C.PULSES) for (const q of [.2, .8, 2.6]) assert.ok(dlf(kind, q, .1) < dlf(kind, q, 0));
+  // Damped rectangular pulse longer than the first overshoot: step overshoot 1 + e^(−πζ/√(1−ζ²)) at t = T/(2√(1−ζ²)).
+  const z = .05, p = C.pulsePeak('rect', 2, z);
+  near(p.DLF, 1 + Math.exp(-Math.PI * z / Math.sqrt(1 - z * z)), 1e-12); near(p.t_peak_over_T, .5 / Math.sqrt(1 - z * z), 1e-12);
+});
+
+test('pulseResponse: starts at rest, is continuous at the pulse end, v is dx/dt, and never exceeds the DLF', () => {
+  for (const kind of C.PULSES) for (const z of [0, .05, .4]) for (const q of [.07, .5, .8, 1, 3.3]) {
+    const at = (t) => C.pulseResponse(t, kind, q, z), tag = `${kind} ${q} ${z}`;
+    assert.ok(Math.abs(at(0).x) < 1e-15 && Math.abs(at(0).v) < 1e-12, tag);
+    const a = at(q * (1 - 1e-12)), b = at(q);                             // displacement and velocity carry across td
+    assert.ok(Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.v - b.v) < 1e-8, `${tag} join ${a.x} ${b.x} ${a.v} ${b.v}`);
+    for (const t of [.03, .4 * q, 1.3 * q + .2, q + 2.1]) { const h = 1e-6; near((at(t + h).x - at(t - h).x) / (2 * h), at(t).v, 1e-6 + 1e-6 / Math.abs(at(t).v || 1)); }
+    const peak = C.pulsePeak(kind, q, z); let top = -Infinity;
+    for (let i = 0; i <= 4000; i++) top = Math.max(top, at((q + 3) * i / 4000).x);
+    assert.ok(top <= peak.DLF + 1e-12 && top > peak.DLF - 2e-3 * Math.max(1, 1 / q), `${tag} brute ${top} vs ${peak.DLF}`);
+    near(at(peak.t_peak_over_T).x, peak.DLF, 1e-9);
+  }
+  // Force shapes: rectangular is on then off, half-sine swells and returns to 0, the ramp grows and is then held.
+  assert.deepEqual([0, .4, .79, .8, 2].map(t => C.pulseResponse(t, 'rect', .8, 0).F), [1, 1, 1, 0, 0]);
+  near(C.pulseResponse(.4, 'halfsine', .8, 0).F, 1, 1e-15); assert.equal(C.pulseResponse(0, 'halfsine', .8, 0).F, 0); assert.equal(C.pulseResponse(.8, 'halfsine', .8, 0).F, 0);
+  assert.deepEqual([0, .2, .8, 5].map(t => C.pulseResponse(t, 'ramp', .8, 0).F), [0, .25, 1, 1]);
+  // Held ramp settles on the static deflection; the other two return to rest (ζ = 0.4, 30 periods later).
+  near(C.pulseResponse(30, 'ramp', .8, .4).x, 1, 1e-9); assert.ok(Math.abs(C.pulseResponse(30, 'rect', .8, .4).x) < 1e-9);
+  // Half-sine at resonance (td = T/2, ζ = 0) is the 0/0 case of the textbook form: x(td) = π/2 exactly.
+  near(C.pulseResponse(.5, 'halfsine', .5, 0).x, Math.PI / 2, 1e-12);
+  // Long, heavily damped half-sine far into the pulse stays finite (e^(a·t) overflow guard).
+  const far = C.pulseResponse(900, 'halfsine', 1000, .9); assert.ok(Number.isFinite(far.x) && Math.abs(far.x - Math.sin(Math.PI * .9)) < 1e-2, `${far.x}`);
+});
+
+test('dlfPulse: SI in and out, hand numbers, and invalid inputs', () => {
+  // fn 10 Hz → T 0.1 s; td 0.08 s → td/T 0.8; 100 N on 10 kN/m → 10 mm static; rectangular DLF 2 → 20 mm, 200 N, at T/2 = 0.05 s.
+  const r = C.dlfPulse({ kind: 'rect', td: .08, fn: 10, F0: 100, k: 1e4 });
+  near(r.T, .1, 1e-15); near(r.td_over_T, .8, 1e-15); near(r.DLF, 2, 1e-12); near(r.x_static, .01, 1e-15); near(r.x_max, .02, 1e-12);
+  near(r.t_peak, .05, 1e-12); near(r.F_eq, 200, 1e-12); assert.equal(r.phase, 'primary'); assert.equal(r.primary, true);
+  const h = C.dlfPulse({ kind: 'halfsine', td: .1, fn: 10, zeta: 0, F0: 100, k: 1e4 });
+  near(h.DLF, Math.sqrt(3), 1e-12); near(h.x_max, .01 * Math.sqrt(3), 1e-12); near(h.F_eq, 100 * Math.sqrt(3), 1e-12);
+  const m = C.dlfPulse({ kind: 'ramp', td: .08, fn: 10, zeta: 0, F0: 100, k: 1e4 });
+  near(m.DLF, 1 + Math.sin(.8 * Math.PI) / (.8 * Math.PI), 1e-12); assert.equal(m.primary, false);
+  assert.equal(C.dlfPulse({ kind: 'rect', td: .08, fn: 10, F0: 0, k: 1e4 }).x_max, 0);          // no load: no deflection, DLF still defined
+  for (const bad of [{ kind: 'triangle' }, { kind: undefined }, { td: 0 }, { td: -1 }, { td: NaN }, { td: Infinity }, { fn: 0 }, { fn: NaN }, { zeta: -.01 }, { zeta: 1 }, { zeta: NaN },
+    { F0: -1 }, { F0: NaN }, { k: 0 }, { k: Infinity }])
+    assert.throws(() => C.dlfPulse({ kind: 'rect', td: .08, fn: 10, zeta: .05, F0: 100, k: 1e4, ...bad }), JSON.stringify(bad));
+  for (const bad of [[-1e-9, 'rect', .8, 0], [NaN, 'rect', .8, 0], [1, 'saw', .8, 0], [1, 'rect', 0, 0], [1, 'rect', .8, 1], [1, 'rect', .8, -.1]])
+    assert.throws(() => C.pulseResponse(...bad), JSON.stringify(bad));
+  // The half-sine search is bounded: td/T up to PULSE_MAX_RATIO, an error (never a made-up value) above it. Other shapes have no limit.
+  assert.equal(C.PULSE_MAX_RATIO, 2000);
+  const edge = C.pulsePeak('halfsine', 2000, 0); assert.ok(edge.DLF > 1 && edge.DLF < 1.0003);
+  assert.throws(() => C.pulsePeak('halfsine', 2000.5, 0), /not supported/); assert.throws(() => C.dlfPulse({ kind: 'halfsine', td: 300, fn: 10, F0: 1, k: 1 }), /not supported/);
+  near(C.pulsePeak('rect', 1e6, 0).DLF, 2, 1e-12); near(C.pulsePeak('ramp', 1e6, 0).DLF, 1, 1e-6);
+});

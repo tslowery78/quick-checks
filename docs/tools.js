@@ -377,4 +377,76 @@ export const TOOLS = [
       'The scene is a quasi-steady sweep: each frequency is shown at its steady-state amplitude and phase, divided by the peak. A real sweep this fast would lag and smear the peak.'],
     refs: 'Ewins, Modal Testing, half-power point method; Rao, Mechanical Vibrations, quality factor and bandwidth.',
   },
+  {
+    id: 'dlf_pulse', sim: { kind: 'sdofRig', drive: 'pulse' }, title: 'Pulse load: dynamic load factor (DLF)', group: 'Structural Dynamics',
+    blurb: 'Dynamic load factor for rectangular, half-sine and ramp pulses: how far one hit drives a spring-mass past its static deflection.',
+    modes: [['rect', 'Rectangular'], ['halfsine', 'Half-sine'], ['ramp', 'Ramp (held)']],
+    inputs: [
+      { key: 'td', label: 'Pulse duration t_d (ramp: rise time)', dim: 'time', def: [0.08, 0.08] },
+      { key: 'fn', label: 'Natural frequency fn', dim: 'frequency', unit: 'Hz', def: [10, 10] },
+      { key: 'zeta', label: 'Damping ratio ζ', dim: 'none', def: [0, 0] },
+      { key: 'F0', label: 'Peak force F₀', dim: 'force', def: [25, 100] },
+      { key: 'k', label: 'Stiffness k', dim: 'stiffness', def: [50, 10] },
+    ],
+    outputs: [
+      { key: 'T', label: 'Natural period T = 1/fn', dim: 'time' },
+      { key: 'td_over_T', label: 'Duration ratio t_d/T', dim: 'none' },
+      { key: 'DLF', label: 'Dynamic load factor DLF', dim: 'none' },
+      { key: 'x_static', label: 'Static deflection F₀/k', dim: 'length' },
+      { key: 'x_max', label: 'Peak deflection DLF · x_static', dim: 'length' },
+      { key: 't_peak', label: 'Time of the peak t_peak', dim: 'time' },
+      { key: 'F_eq', label: 'Equivalent static force DLF · F₀', dim: 'force' },
+    ],
+    compute: (v, mode) => {
+      const t = C.dlfPulse({ kind: mode, td: v.td, fn: v.fn, zeta: v.zeta, F0: v.F0, k: v.k });
+      const when = mode === 'ramp' ? 'Residual peak: the largest deflection comes after the rise ends, on the first overshoot about the held load.'
+        : t.primary ? 'Primary peak: the largest deflection happens while the pulse is still on.'
+        : 'Residual peak: the largest deflection comes after the pulse has ended, in free vibration.';
+      return { ...t, kind: mode, _table: { head: ['Peak'], rows: [[when]] } };
+    },
+    demo: (v, canvas, mode) => {
+      const ratio = v.td * v.fn, here = C.pulsePeak(mode, ratio, v.zeta);
+      canvas.style.height = '400px';        // two stacked panels, each with its own x axis
+      // Shock spectrum for this pulse shape and ζ. The window follows an operating point outside 0.05..10.
+      const top = mode === 'halfsine' ? C.PULSE_MAX_RATIO : 1e6;
+      const xmin = Math.min(0.05, 10 ** Math.floor(Math.log10(ratio))), xmax = Math.min(top, Math.max(10, 10 ** Math.ceil(Math.log10(ratio))));
+      const key = [mode, v.zeta, xmin, xmax].join();
+      if (spectrum.key !== key) {
+        const grid = logspace(xmin, xmax, 200), at = (z) => grid.map(q => [q, C.pulsePeak(mode, q, z).DLF]);
+        spectrum = { key, bold: at(v.zeta), undamped: v.zeta > 0 ? at(0) : null };
+      }
+      const bold = [...spectrum.bold, [ratio, here.DLF]].sort((a, b) => a[0] - b[0]);   // include the operating point itself
+      drawPlot(canvas, {
+        band: [0, 0.54], xlog: true, xmin, xmax, ymin: 0, ymax: 2.2, yticks: [0, 0.5, 1, 1.5, 2],
+        xlabel: 'Duration ratio t_d / T', ylabel: 'DLF = x_max / x_static',
+        curves: [{ guide: true, label: 'static', pts: [[xmin, 1], [xmax, 1]] }, ...(spectrum.undamped ? [{ faint: true, label: 'ζ = 0', pts: spectrum.undamped }] : []), { pts: bold }],
+        point: { x: ratio, y: here.DLF },
+      });
+      // Time history at the operating point: force (dashed) and response, both normalized.
+      const span = Math.max(3, Math.ceil(ratio + 2)), n = Math.min(4000, Math.max(600, span * 40));
+      const ts = Array.from({ length: n + 1 }, (_, i) => span * i / n), xs = ts.map(t => C.pulseResponse(t, mode, ratio, v.zeta).x);
+      const force = mode === 'rect' ? [[0, 0], [0, 1], [ratio, 1], [ratio, 0], [span, 0]] : mode === 'ramp' ? [[0, 0], [ratio, 1], [span, 1]]
+        : ts.map(t => [t, t < ratio ? Math.sin(Math.PI * t / ratio) : 0]);
+      const lo = Math.min(0, ...xs), ymin = lo < 0 ? Math.floor(lo * 2 - 1e-9) / 2 : 0, ymax = Math.max(1.5, Math.ceil(here.DLF * 2 + 0.2) / 2);
+      drawPlot(canvas, {
+        band: [0.54, 1], keep: true, xmin: 0, xmax: span, ymin, ymax,
+        xlabel: 'Time t / T', ylabel: 'x / x_static',
+        curves: [{ guide: true, label: 'F / F₀', pts: force }, { pts: ts.map((t, i) => [t, xs[i]]) }],
+        vline: { x: ratio, label: 't_d' }, point: { x: here.t_peak_over_T, y: here.DLF },
+      });
+    },
+    formula: 'T = 1/fn;  x_static = F₀/k;  x(t) = exact Duhamel solution from rest for the chosen pulse;  DLF = max over t ≥ 0 of x(t)/x_static;  x_max = DLF · x_static;  F_eq = DLF · F₀.  Undamped checks: rectangular DLF = 2·sin(π·t_d/T) for t_d/T < 0.5, else 2;  ramp DLF = 1 + |sin(π·t_d/T)|/(π·t_d/T);  half-sine at t_d/T = 1: DLF = √3;  very short pulses: DLF → 2π·t_d/T (rectangular), 4·t_d/T (half-sine), 2 (ramp, a sudden step).  Symbols: t_d pulse duration (ramp: rise time, then held at F₀), fn natural frequency (Hz), T natural period, ζ damping ratio, F₀ peak force, k stiffness.',
+    explain: ['A sudden load can deflect a structure up to twice as far as the same load applied slowly: the mass overshoots. DLF is that ratio.',
+      'Short hit (t_d well under T/2): the structure only feels the impulse (area under the force), so DLF is small and the peak comes after the hit, in free vibration (residual).',
+      'Long hit (t_d above about T/2): the peak comes while the load is still on (primary). A rectangular pulse reaches the full 2; a half-sine tops out near 1.77 around t_d/T = 0.8 and settles toward 1.',
+      'Ramp: rising over a whole number of periods cancels the overshoot (DLF = 1 undamped); a rise much shorter than T acts like a sudden step (DLF → 2).',
+      'In the 3D rig the amber arrow is F(t), the outline is the static deflection and the yellow line latches at the peak: its height over the outline height is the DLF.'],
+    assumptions: ['Single degree of freedom, linear spring, viscous damping, underdamped (0 ≤ ζ < 1), at rest when the pulse starts.',
+      'DLF is on displacement (equally on spring force). The peak is searched over all time: during the pulse and in the free vibration after it.',
+      'Ramp: the load rises linearly over t_d and then stays at F₀, so its peak is always after the rise ("residual").',
+      'Half-sine: t_d/T up to 2000; beyond that the load is quasi-static (DLF within 0.03% of 1).',
+      'Upper plot: DLF against t_d/T for this pulse shape at your ζ (faint: ζ = 0). Lower plot: F(t) dashed and x(t) at your inputs, the dot marks the peak.'],
+    refs: 'Biggs, Introduction to Structural Dynamics, maximum response charts for pulse loads; Chopra, Dynamics of Structures, response to pulse excitations; Harris & Piersol, Shock and Vibration Handbook, transient response to step and pulse functions.',
+  },
 ];
+let spectrum = {};   // dlf_pulse demo: last DLF-vs-t_d/T curves, reused while only the operating point moves

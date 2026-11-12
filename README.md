@@ -14,10 +14,10 @@ Static calculator site (no build step, no server code, no tracking). Live: https
 One concept per day (group "Structural Dynamics"; shared with the iOS app, see the design doc).
 
 1. Function: add a pure SI function to `docs/calcs.js` and export it (object in, object out; accelerations in Earth g, g0 = 9.80665).
-2. Spec: add an entry to `docs/tools.js` with `group: 'Structural Dynamics'`, inputs, outputs, `compute`, `formula` (symbols defined), `explain` (2-3 plain lines), assumptions, refs. Optional `demo: (si, canvas) => ...` redraws live on every input change; use `drawPlot` and `logspace` from `docs/plot.js` (log or linear axes, faint context curves, `vline`, one `point` for the operating point).
+2. Spec: add an entry to `docs/tools.js` with `group: 'Structural Dynamics'`, inputs, outputs, `compute`, `formula` (symbols defined), `explain` (2-3 plain lines), assumptions, refs. Optional `demo: (si, canvas, mode) => ...` redraws live on every input change; use `drawPlot` and `logspace` from `docs/plot.js` (log or linear axes, faint context curves, `vline`, one `point` for the operating point).
 3. Refs test: write independent reference values (numpy/scipy, not calcs.js) to JSON, copy to `tests/refs/<id>.json`, and add a test in `tests/calcs.test.mjs` checking every field to rel 1e-6.
 4. Spec test: in `tests/specs.test.mjs`, call the spec's `compute` with SI inputs (accel in m/s², not g) and check SI outputs against the same refs. `compute` gets m/s²; convert to g before calling a g-based function.
-5. Smoke: add the id to `TOOLS` in `tests/smoke.py` (and a canvas non-blank check like the transmissibility one). If the spec has a driven `sim`, add a `run_driven_checks(p, '<id>', '<drive>')` line (`run_scene_checks` for a scene with a trace strip).
+5. Smoke: add the id to `TOOLS` in `tests/smoke.py` (and a canvas non-blank check like the transmissibility one). If the spec has a driven `sim`, add a `run_driven_checks(p, '<id>', '<drive>')` line (`run_scene_checks` for a scene with a trace strip; the pulse scene has its own `run_pulse_checks`).
 6. Run `npm test` and the smoke test, then check a 390 px wide screenshot.
 
 ## ShakeLab interactive free decay
@@ -103,3 +103,34 @@ them, with the camera held still, to prove that the mass and the base move.
 
 `tests/sim_scene_smoke.py` checks it in the browser (mass mesh position with a still camera, glow
 and band edges, closed form at the scene clock, restart, invalid inputs, disposal, 2D fallback).
+
+## ShakeLab pulse response (dynamic load factor)
+
+`drive: 'pulse'` is the `dlf_pulse` scene: one force pulse on the mass, from rest. The math is the
+exact piecewise Duhamel closed form in `docs/calcs.js` (no time stepping): `pulseResponse(t, kind,
+tdOverT, zeta)` gives x/x_static, velocity and F/F0 at t in natural periods T, `pulsePeak(kind,
+tdOverT, zeta)` gives the exact DLF, when it happens and whether that is during the pulse
+("primary") or after it ("residual"), and `dlfPulse({kind, td, fn, zeta, F0, k})` is the SI
+calculator. Pulse shapes (`PULSES`): `rect`, `halfsine`, `ramp` (rises over td, then held at F0).
+
+- `params` is `{pulse, tdOverT, zeta, fn}`, numbers only because the iOS host sends
+  `[String: Double]`: `pulse` is the index in `PULSES` (0 rect, 1 half-sine, 2 ramp).
+- Displacement is x/x_static. The wire outline is the static deflection (x = 1). The amber arrow's
+  length follows F(t). A yellow line follows the largest x so far and latches on the exact DLF once
+  the peak time has passed (frames never land exactly on the peak). The corner gauge traces F(t)
+  and x(t) over the first few periods with the same markers.
+- HUD: pulse shape, td/T, playback label, "DLF live max", primary/residual, and the normalization.
+- Playback: the ringing at fn plays at 0.4 to 1.5 Hz (same rule as the other rigs). **Hit it**
+  replays from rest after 0.4 s at rest. One hit, not a loop: with ζ = 0 the mass rings on.
+  With Reduce Motion nothing moves until **Hit it**; otherwise the hit plays once on scroll-in.
+- Limits: 0 ≤ ζ < 1. A half-sine longer than 2000 periods (`PULSE_MAX_RATIO`) is refused with a
+  message instead of searched (its DLF is within 0.03% of 1); rectangular and ramp have no limit.
+- The 2D demo under the scene is the shock spectrum (DLF against td/T for the chosen shape and ζ,
+  faint ζ = 0 curve for comparison) with the operating point, and the time history x(t), F(t).
+
+`tests/sim_pulse_smoke.py` samples the scene every animation frame from inside the page and checks
+all three shapes: rest during the lead-in, mass mesh = scale × closed form with a still camera,
+arrow length = 0.8·F(t), outline at x = 1, peak line following then latching on the exact DLF,
+primary/residual, HUD = calculator, restart on new inputs, invalid inputs, disposal, 2D fallback.
+Headless software WebGL can fall to about 10 frames per second on a busy machine, so its checks
+wait for the next drawn frame instead of reading the HUD or meshes straight after an input.
